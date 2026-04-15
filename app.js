@@ -760,12 +760,14 @@ async function startCrop(target) {
   cropTitle.textContent = target === "avatar" ? "Crop profile picture" : "Crop post image";
   cropZoom.value = "1";
 
-  const vw = cropViewport.clientWidth;
-  const vh = cropViewport.clientHeight;
-  cropState.baseScale = Math.max(vw / cropState.image.width, vh / cropState.image.height);
-
-  renderCropPreview();
   cropDialog.showModal();
+
+  requestAnimationFrame(() => {
+    const vw = cropViewport.clientWidth || 320;
+    const vh = cropViewport.clientHeight || 320;
+    cropState.baseScale = Math.max(vw / cropState.image.width, vh / cropState.image.height);
+    renderCropPreview();
+  });
 }
 
 function renderCropPreview() {
