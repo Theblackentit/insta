@@ -1,9 +1,12 @@
 const STORAGE_KEY = "offline-insta-v1";
+const MAX_IMAGE_DIMENSION = 1600;
+const OUTPUT_QUALITY = 0.82;
 
 const state = {
   accounts: [],
   posts: [],
   activeAccountId: null,
+  activeView: "home",
 };
 
 const accountForm = document.getElementById("account-form");
@@ -13,17 +16,23 @@ const activeAccountEl = document.getElementById("active-account");
 const feedEl = document.getElementById("feed");
 const clearButton = document.getElementById("clear-data");
 const postTemplate = document.getElementById("post-template");
+const tabButtons = Array.from(document.querySelectorAll("[data-view-tab]"));
+const views = Array.from(document.querySelectorAll("[data-view]"));
 
 init();
 
 function init() {
   hydrate();
+  renderTabs();
   renderAccounts();
   renderFeed();
 
   accountForm.addEventListener("submit", handleCreateAccount);
   postForm.addEventListener("submit", handleCreatePost);
   clearButton.addEventListener("click", clearData);
+  tabButtons.forEach((button) => {
+    button.addEventListener("click", () => setActiveView(button.dataset.viewTab || "home"));
+  });
 }
 
 function hydrate() {
@@ -35,13 +44,19 @@ function hydrate() {
     state.accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
     state.posts = Array.isArray(parsed.posts) ? parsed.posts : [];
     state.activeAccountId = parsed.activeAccountId || state.accounts[0]?.id || null;
+    state.activeView = parsed.activeView || "home";
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
 }
 
 function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function handleCreateAccount(event) {
@@ -77,6 +92,26 @@ function setActiveAccount(accountId) {
   renderAccounts();
 }
 
+function setActiveView(viewName) {
+  state.activeView = viewName;
+  persist();
+  renderTabs();
+}
+
+function renderTabs() {
+  const activeView = state.activeView;
+
+  tabButtons.forEach((button) => {
+    const isActive = button.dataset.viewTab === activeView;
+    button.classList.toggle("active", isActive);
+  });
+
+  views.forEach((view) => {
+    const isActive = view.dataset.view === activeView;
+    view.classList.toggle("active", isActive);
+  });
+}
+
 async function handleCreatePost(event) {
   event.preventDefault();
 
@@ -85,38 +120,66 @@ async function handleCreatePost(event) {
     return;
   }
 
-  const formData = new FormData(postForm);
-  const file = formData.get("photo");
-  const caption = String(formData.get("caption") || "").trim();
+  const submitButton = postForm.querySelector("button[type='submit']");
+  submitButton.disabled = true;
+  submitButton.textContent = "Processing...";
 
-  if (!(file instanceof File) || !file.type.startsWith("image/")) {
-    alert("Please choose an image file.");
-    return;
+  try {
+    const formData = new FormData(postForm);
+    const file = formData.get("photo");
+    const caption = String(formData.get("caption") || "").trim();
+
+    if (!(file instanceof File) || !file.type.startsWith("image/")) {
+      alert("Please choose an image file.");
+      return;
+    }
+
+    const imageDataUrl = await fileToOptimizedDataUrl(file);
+
+    const post = {
+      id: crypto.randomUUID(),
+      accountId: state.activeAccountId,
+      imageDataUrl,
+      caption,
+      createdAt: Date.now(),
+    };
+
+    state.posts.unshift(post);
+
+    if (!persist()) {
+      state.posts.shift();
+      alert("This image is still too large to save locally. Try a smaller file.");
+      return;
+    }
+
+    postForm.reset();
+    setActiveView("home");
+    renderFeed();
+  } catch {
+    alert("Couldn't process that image. Please try a different image file.");
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Post";
   }
-
-  const imageDataUrl = await fileToDataUrl(file);
-
-  const post = {
-    id: crypto.randomUUID(),
-    accountId: state.activeAccountId,
-    imageDataUrl,
-    caption,
-    createdAt: Date.now(),
-  };
-
-  state.posts.unshift(post);
-  persist();
-  postForm.reset();
-  renderFeed();
 }
 
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
+async function fileToOptimizedDataUrl(file) {
+  const imageBitmap = await createImageBitmap(file);
+  const ratio = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(imageBitmap.width, imageBitmap.height));
+  const width = Math.max(1, Math.round(imageBitmap.width * ratio));
+  const height = Math.max(1, Math.round(imageBitmap.height * ratio));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable");
+
+  ctx.drawImage(imageBitmap, 0, 0, width, height);
+  imageBitmap.close();
+
+  return canvas.toDataURL("image/jpeg", OUTPUT_QUALITY);
 }
 
 function clearData() {
@@ -126,7 +189,9 @@ function clearData() {
   state.accounts = [];
   state.posts = [];
   state.activeAccountId = null;
+  state.activeView = "home";
   localStorage.removeItem(STORAGE_KEY);
+  renderTabs();
   renderAccounts();
   renderFeed();
 }
@@ -153,9 +218,7 @@ function renderAccounts() {
   }
 
   const active = state.accounts.find((account) => account.id === state.activeAccountId);
-  activeAccountEl.textContent = active
-    ? `Posting as @${active.username}`
-    : "No account selected";
+  activeAccountEl.textContent = active ? `Posting as @${active.username}` : "No account selected";
 }
 
 function renderFeed() {
@@ -172,9 +235,7 @@ function renderFeed() {
   for (const post of state.posts) {
     const account = state.accounts.find((item) => item.id === post.accountId);
     const postNode = postTemplate.content.firstElementChild.cloneNode(true);
-    postNode.querySelector(".post-user").textContent = account
-      ? `@${account.username}`
-      : "@deleted-account";
+    postNode.querySelector(".post-user").textContent = account ? `@${account.username}` : "@deleted-account";
     postNode.querySelector(".post-time").textContent = formatDate(post.createdAt);
     postNode.querySelector(".post-image").src = post.imageDataUrl;
     postNode.querySelector(".post-caption").textContent = post.caption || "";

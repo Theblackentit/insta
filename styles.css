@@ -35,13 +35,52 @@ body {
   font-size: 0.95rem;
 }
 
-.layout {
+.app-shell {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   gap: 1rem;
   padding: 1rem;
   max-width: 1200px;
   margin: 0 auto;
+}
+
+.sidebar {
+  display: grid;
+  gap: 1.2rem;
+  align-content: start;
+}
+
+.tab-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.tab-button {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: #161616;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tab-button.active {
+  border-color: var(--accent);
+  background: rgba(244, 63, 94, 0.14);
+}
+
+.content-area {
+  min-width: 0;
+}
+
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
 }
 
 .panel {
@@ -118,10 +157,6 @@ button.ghost {
   border-color: var(--accent);
 }
 
-.feed-panel {
-  grid-column: 1 / -1;
-}
-
 .feed-header {
   display: flex;
   justify-content: space-between;
@@ -159,6 +194,7 @@ button.ghost {
 
 .post-image {
   width: 100%;
+  max-height: 360px;
   aspect-ratio: 1 / 1;
   object-fit: cover;
   background: #0f0f0f;
@@ -176,10 +212,29 @@ button.ghost {
   color: var(--muted);
 }
 
+.hint {
+  margin-top: 0.8rem;
+  font-size: 0.9rem;
+}
+
+.muted-view {
+  text-align: center;
+}
+
 .empty {
   color: var(--muted);
   border: 1px dashed var(--border);
   border-radius: 10px;
   padding: 1rem;
   text-align: center;
+}
+
+@media (max-width: 860px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+  }
 }
