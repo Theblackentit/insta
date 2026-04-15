@@ -5,14 +5,14 @@ A polished, fully offline Instagram-style app built with plain HTML/CSS/JS.
 ## Features
 
 - Create and switch between custom accounts.
+- Upload profile pictures for accounts.
 - Upload photo posts with captions.
-- Feed view for all posts.
-- Profile view to show only the selected account’s posts.
-- Reels view with vertical snap-scroll browsing across all posts.
-- Click any post to open a fullscreen modal.
-- Add comments to posts from inside the modal.
+- Home feed for all posts.
+- Profile view styled like Instagram profile pages (avatar, stats, grid).
+- Fullscreen reels mode with a down-arrow button to move through posts.
+- Click any post/reel to open a large post modal.
+- Add comments to posts in the modal.
 - Data is saved locally in browser `localStorage` (no backend required).
-- Reset all saved local data with one button.
 
 ## Run
 
@@ -26,5 +26,5 @@ Then go to <http://localhost:8000>.
 
 ## Notes
 
-- This is intentionally offline and local-only.
+- This app is intentionally offline and local-only.
 - Large image uploads consume localStorage quickly because images are stored as Data URLs.
