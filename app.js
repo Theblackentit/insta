@@ -1,5 +1,6 @@
-const STORAGE_KEY = "offline-insta-v5";
+const STORAGE_KEY = "offline-insta-v6";
 const AVATAR_SIZE = 256;
+const POST_SIZE = 1080;
 
 const state = {
   accounts: [],
@@ -10,12 +11,14 @@ const state = {
   viewMode: "feed",
   selectedPostId: null,
   currentReelIndex: 0,
+  searchQuery: "",
 };
 
 const accountForm = document.getElementById("account-form");
 const postForm = document.getElementById("post-form");
 const commentForm = document.getElementById("comment-form");
 const dmForm = document.getElementById("dm-form");
+const searchInput = document.getElementById("search-input");
 const dmFrom = document.getElementById("dm-from");
 const dmTo = document.getElementById("dm-to");
 const dmThread = document.getElementById("dm-thread");
@@ -30,6 +33,7 @@ const clearButton = document.getElementById("clear-data");
 const postTemplate = document.getElementById("post-template");
 
 const viewFeedButton = document.getElementById("view-feed");
+const viewExploreButton = document.getElementById("view-explore");
 const viewProfileButton = document.getElementById("view-profile");
 const viewReelsButton = document.getElementById("view-reels");
 const viewDmButton = document.getElementById("view-dm");
@@ -53,6 +57,7 @@ init();
 function init() {
   hydrate();
   ensureActiveAccount();
+  searchInput.value = state.searchQuery;
   renderAll();
 
   accountForm.addEventListener("submit", handleCreateAccount);
@@ -63,9 +68,15 @@ function init() {
   dmFrom.addEventListener("change", renderDmThread);
   dmTo.addEventListener("change", renderDmThread);
 
+  searchInput.addEventListener("input", () => {
+    state.searchQuery = searchInput.value.trim().toLowerCase();
+    renderFeed();
+  });
+
   clearButton.addEventListener("click", clearData);
 
   viewFeedButton.addEventListener("click", () => setViewMode("feed"));
+  viewExploreButton.addEventListener("click", () => setViewMode("explore"));
   viewProfileButton.addEventListener("click", () => setViewMode("profile"));
   viewReelsButton.addEventListener("click", () => setViewMode("reels"));
   viewDmButton.addEventListener("click", () => setViewMode("dm"));
@@ -99,9 +110,10 @@ function hydrate() {
     state.dms = Array.isArray(parsed.dms) ? parsed.dms : [];
     state.follows = Array.isArray(parsed.follows) ? parsed.follows : [];
     state.activeAccountId = parsed.activeAccountId || null;
-    state.viewMode = ["feed", "profile", "reels", "dm"].includes(parsed.viewMode)
+    state.viewMode = ["feed", "explore", "profile", "reels", "dm"].includes(parsed.viewMode)
       ? parsed.viewMode
       : "feed";
+    state.searchQuery = typeof parsed.searchQuery === "string" ? parsed.searchQuery : "";
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
@@ -115,6 +127,7 @@ function persist() {
     follows: state.follows,
     activeAccountId: state.activeAccountId,
     viewMode: state.viewMode,
+    searchQuery: state.searchQuery,
   }));
 }
 
@@ -153,7 +166,11 @@ async function handleCreateAccount(event) {
       return;
     }
 
-    avatarDataUrl = await fileToSizedSquareDataUrl(avatarFile, AVATAR_SIZE);
+    avatarDataUrl = await fileToSizedSquareDataUrl(avatarFile, AVATAR_SIZE, {
+      zoom: Number(document.getElementById("avatar-zoom").value),
+      offsetX: Number(document.getElementById("avatar-x").value),
+      offsetY: Number(document.getElementById("avatar-y").value),
+    });
   }
 
   state.accounts.unshift({
@@ -194,7 +211,11 @@ async function handleCreatePost(event) {
     return;
   }
 
-  const imageDataUrl = await fileToDataUrl(photo);
+  const imageDataUrl = await fileToSizedSquareDataUrl(photo, POST_SIZE, {
+    zoom: Number(document.getElementById("post-zoom").value),
+    offsetX: Number(document.getElementById("post-x").value),
+    offsetY: Number(document.getElementById("post-y").value),
+  });
 
   state.posts.unshift({
     id: crypto.randomUUID(),
@@ -265,6 +286,7 @@ function clearData() {
   state.viewMode = "feed";
   state.currentReelIndex = 0;
   state.selectedPostId = null;
+  state.searchQuery = "";
 
   localStorage.removeItem(STORAGE_KEY);
   renderAll();
@@ -292,6 +314,7 @@ function renderModeSections() {
 
 function renderNav() {
   viewFeedButton.classList.toggle("active", state.viewMode === "feed");
+  viewExploreButton.classList.toggle("active", state.viewMode === "explore");
   viewProfileButton.classList.toggle("active", state.viewMode === "profile");
   viewReelsButton.classList.toggle("active", state.viewMode === "reels");
   viewDmButton.classList.toggle("active", state.viewMode === "dm");
@@ -303,6 +326,8 @@ function renderNav() {
     viewTitleEl.textContent = "Reels";
   } else if (state.viewMode === "dm") {
     viewTitleEl.textContent = "Messages";
+  } else if (state.viewMode === "explore") {
+    viewTitleEl.textContent = "Explore";
   } else {
     viewTitleEl.textContent = "Home feed";
   }
@@ -411,6 +436,8 @@ function renderProfileHeader() {
   const followers = getFollowersCount(account.id);
   const following = getFollowingCount(account.id);
   const isFollowing = isFollowingActive(account.id);
+  const followerChips = getFollowerNames(account.id);
+  const followingChips = getFollowingNames(account.id);
 
   profileHeader.classList.remove("hidden");
   profileHeader.innerHTML = `
@@ -425,7 +452,10 @@ function renderProfileHeader() {
         <span><strong>${following}</strong> following</span>
       </div>
       <button type="button" id="follow-btn" class="follow-btn">${isFollowing ? "Following" : "Follow"}</button>
-      <p class="muted">Offline creator account • Local only</p>
+      <div class="follow-lists small">
+        <div><strong>Followers:</strong> ${followerChips || '<span class="muted">none</span>'}</div>
+        <div><strong>Following:</strong> ${followingChips || '<span class="muted">none</span>'}</div>
+      </div>
     </div>
   `;
 
@@ -586,6 +616,24 @@ function getFollowingCount(accountId) {
   return 80 + state.follows.filter((item) => item.followerId === accountId).length;
 }
 
+function getFollowerNames(accountId) {
+  return state.follows
+    .filter((item) => item.followingId === accountId)
+    .map((item) => state.accounts.find((account) => account.id === item.followerId))
+    .filter(Boolean)
+    .map((account) => `<span class="follow-chip">@${escapeHtml(account.username)}</span>`)
+    .join("");
+}
+
+function getFollowingNames(accountId) {
+  return state.follows
+    .filter((item) => item.followerId === accountId)
+    .map((item) => state.accounts.find((account) => account.id === item.followingId))
+    .filter(Boolean)
+    .map((account) => `<span class="follow-chip">@${escapeHtml(account.username)}</span>`)
+    .join("");
+}
+
 function openPost(postId) {
   const post = state.posts.find((item) => item.id === postId);
   if (!post) return;
@@ -628,11 +676,28 @@ function closeModal() {
 }
 
 function getVisiblePosts() {
+  let posts;
   if (state.viewMode === "profile") {
     if (!state.activeAccountId) return [];
-    return state.posts.filter((post) => post.accountId === state.activeAccountId);
+    posts = state.posts.filter((post) => post.accountId === state.activeAccountId);
+  } else if (state.viewMode === "explore") {
+    posts = state.posts.filter((post) => post.accountId !== state.activeAccountId);
+    if (!posts.length) posts = state.posts;
+  } else {
+    posts = state.posts;
   }
-  return state.posts;
+
+  return filterBySearch(posts);
+}
+
+function filterBySearch(posts) {
+  if (!state.searchQuery) return posts;
+  return posts.filter((post) => {
+    const account = state.accounts.find((item) => item.id === post.accountId);
+    const username = account?.username || "";
+    const caption = post.caption || "";
+    return username.toLowerCase().includes(state.searchQuery) || caption.toLowerCase().includes(state.searchQuery);
+  });
 }
 
 function getActiveAccount() {
@@ -654,7 +719,7 @@ function getAvatar(account) {
 function createEmptyMessage() {
   const p = document.createElement("p");
   p.className = "empty";
-  p.textContent = "No posts yet. Create an account and upload your first post.";
+  p.textContent = "No posts match this view yet.";
   return p;
 }
 
@@ -680,13 +745,11 @@ function fileToDataUrl(file) {
   });
 }
 
-async function fileToSizedSquareDataUrl(file, size) {
+async function fileToSizedSquareDataUrl(file, size, options) {
   const source = await fileToDataUrl(file);
   const image = await loadImage(source);
 
-  const shortest = Math.min(image.width, image.height);
-  const offsetX = (image.width - shortest) / 2;
-  const offsetY = (image.height - shortest) / 2;
+  const crop = computeCropRect(image.width, image.height, options);
 
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -695,8 +758,25 @@ async function fileToSizedSquareDataUrl(file, size) {
   const context = canvas.getContext("2d");
   if (!context) return source;
 
-  context.drawImage(image, offsetX, offsetY, shortest, shortest, 0, 0, size, size);
+  context.drawImage(image, crop.x, crop.y, crop.side, crop.side, 0, 0, size, size);
   return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+function computeCropRect(width, height, options) {
+  const zoom = Math.max(1, Number(options.zoom) || 1);
+  const base = Math.min(width, height);
+  const side = base / zoom;
+  const maxX = (width - side) / 2;
+  const maxY = (height - side) / 2;
+
+  const clampedX = Math.max(-1, Math.min(1, Number(options.offsetX) || 0));
+  const clampedY = Math.max(-1, Math.min(1, Number(options.offsetY) || 0));
+
+  return {
+    x: (width - side) / 2 + maxX * clampedX,
+    y: (height - side) / 2 + maxY * clampedY,
+    side,
+  };
 }
 
 function loadImage(src) {

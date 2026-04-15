@@ -24,6 +24,8 @@ input, textarea, button, select { font: inherit; }
 input, textarea, select { width: 100%; border-radius: 8px; border: 1px solid var(--border); background: #101010; color: var(--text); padding: .55rem .62rem; }
 button { border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; padding: .55rem .8rem; cursor: pointer; }
 button.ghost { background: transparent; border-color: var(--border); }
+.crop-grid { display: grid; gap: .35rem; }
+.crop-grid label { display: grid; gap: .15rem; }
 
 .account-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .45rem; }
 .account-list button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: .6rem; border: 1px solid var(--border); background: #111; text-align: left; }
@@ -32,6 +34,8 @@ button.ghost { background: transparent; border-color: var(--border); }
 .ig-main { padding: 1.3rem clamp(.9rem, 3vw, 2.4rem); max-width: 980px; width: 100%; margin: 0 auto; }
 .ig-topbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
 .ig-topbar h1 { margin: 0; font-size: 1.2rem; }
+.top-actions { display: flex; gap: .5rem; align-items: center; }
+#search-input { width: 220px; }
 
 .dm-row { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
 .dm-thread { margin-top: .7rem; border-top: 1px solid var(--border); padding-top: .7rem; max-height: 220px; overflow-y: auto; display: grid; gap: .4rem; }
@@ -45,6 +49,8 @@ button.ghost { background: transparent; border-color: var(--border); }
 .profile-meta h2 { margin: 0 0 .4rem; }
 .profile-stats { display: flex; gap: 1rem; margin: .4rem 0; }
 .follow-btn { margin-top: .4rem; width: fit-content; }
+.follow-lists { margin-top: .55rem; display: grid; gap: .35rem; }
+.follow-chip { display: inline-block; border: 1px solid var(--border); border-radius: 999px; padding: .2rem .45rem; margin: .1rem .15rem .1rem 0; font-size: .78rem; color: var(--muted); }
 
 .feed { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .22rem; }
 .post { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #0a0a0a; cursor: pointer; }
@@ -88,4 +94,6 @@ button.ghost { background: transparent; border-color: var(--border); }
   .profile-header { grid-template-columns: 1fr; justify-items: center; text-align: center; }
   .modal-content { grid-template-columns: 1fr; }
   .modal-meta { border-left: 0; border-top: 1px solid var(--border); }
+  .top-actions { flex-direction: column; align-items: stretch; }
+  #search-input { width: 100%; }
 }
