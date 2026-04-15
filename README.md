@@ -9,9 +9,10 @@ A polished, fully offline Instagram-style app built with plain HTML/CSS/JS.
 - Upload photo posts with captions.
 - Home feed for all posts.
 - Profile view styled like Instagram profile pages (avatar, stats, grid).
+- Follow/unfollow button behavior on profile pages.
+- Like and comment buttons directly on each post.
 - Fullscreen reels mode with a down-arrow button to move through posts.
-- Click any post/reel to open a large post modal.
-- Add comments to posts in the modal.
+- Fake DM thread creator between any two accounts.
 - Data is saved locally in browser `localStorage` (no backend required).
 
 ## Run

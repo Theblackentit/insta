@@ -47,6 +47,19 @@
           </form>
         </section>
 
+        <section class="dm-card">
+          <h2>Fake DMs</h2>
+          <form id="dm-form" class="stack">
+            <div class="dm-row">
+              <select id="dm-from" name="from" required></select>
+              <select id="dm-to" name="to" required></select>
+            </div>
+            <input id="dm-text" name="text" type="text" maxlength="200" placeholder="Type a message..." required />
+            <button type="submit">Send DM</button>
+          </form>
+          <div id="dm-thread" class="dm-thread"></div>
+        </section>
+
         <section id="profile-header" class="profile-header hidden"></section>
 
         <section id="feed" class="feed"></section>
@@ -71,8 +84,13 @@
           </div>
         </header>
         <img class="post-image" alt="Posted photo" />
+        <div class="post-actions">
+          <button type="button" class="action-btn like-btn">♡ Like</button>
+          <button type="button" class="action-btn comment-btn">💬 Comment</button>
+        </div>
         <p class="post-caption"></p>
         <footer class="post-footer">
+          <span class="post-likes-count muted small"></span>
           <span class="post-comments-count muted small"></span>
         </footer>
       </article>

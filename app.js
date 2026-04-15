@@ -1,8 +1,10 @@
-const STORAGE_KEY = "offline-insta-v3";
+const STORAGE_KEY = "offline-insta-v4";
 
 const state = {
   accounts: [],
   posts: [],
+  dms: [],
+  follows: [],
   activeAccountId: null,
   viewMode: "feed",
   selectedPostId: null,
@@ -12,6 +14,10 @@ const state = {
 const accountForm = document.getElementById("account-form");
 const postForm = document.getElementById("post-form");
 const commentForm = document.getElementById("comment-form");
+const dmForm = document.getElementById("dm-form");
+const dmFrom = document.getElementById("dm-from");
+const dmTo = document.getElementById("dm-to");
+const dmThread = document.getElementById("dm-thread");
 const accountList = document.getElementById("account-list");
 const activeAccountEl = document.getElementById("active-account");
 const profileHeader = document.getElementById("profile-header");
@@ -48,6 +54,11 @@ function init() {
   accountForm.addEventListener("submit", handleCreateAccount);
   postForm.addEventListener("submit", handleCreatePost);
   commentForm.addEventListener("submit", handleAddComment);
+  dmForm.addEventListener("submit", handleSendDm);
+
+  dmFrom.addEventListener("change", renderDmThread);
+  dmTo.addEventListener("change", renderDmThread);
+
   clearButton.addEventListener("click", clearData);
 
   viewFeedButton.addEventListener("click", () => setViewMode("feed"));
@@ -80,6 +91,8 @@ function hydrate() {
     const parsed = JSON.parse(saved);
     state.accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
     state.posts = Array.isArray(parsed.posts) ? parsed.posts : [];
+    state.dms = Array.isArray(parsed.dms) ? parsed.dms : [];
+    state.follows = Array.isArray(parsed.follows) ? parsed.follows : [];
     state.activeAccountId = parsed.activeAccountId || null;
     state.viewMode = ["feed", "profile", "reels"].includes(parsed.viewMode)
       ? parsed.viewMode
@@ -93,6 +106,8 @@ function persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     accounts: state.accounts,
     posts: state.posts,
+    dms: state.dms,
+    follows: state.follows,
     activeAccountId: state.activeAccountId,
     viewMode: state.viewMode,
   }));
@@ -184,6 +199,7 @@ async function handleCreatePost(event) {
     imageDataUrl,
     caption,
     comments: [],
+    likes: [],
     createdAt: Date.now(),
   });
 
@@ -217,12 +233,37 @@ function handleAddComment(event) {
   renderFeed();
 }
 
+function handleSendDm(event) {
+  event.preventDefault();
+
+  const fromId = dmFrom.value;
+  const toId = dmTo.value;
+  const textInput = document.getElementById("dm-text");
+  const text = textInput.value.trim();
+
+  if (!fromId || !toId || fromId === toId || !text) return;
+
+  state.dms.push({
+    id: crypto.randomUUID(),
+    fromId,
+    toId,
+    text,
+    createdAt: Date.now(),
+  });
+
+  textInput.value = "";
+  persist();
+  renderDmThread();
+}
+
 function clearData() {
-  const confirmed = confirm("Delete all local accounts/posts/comments?");
+  const confirmed = confirm("Delete all local accounts/posts/comments/likes/follows/DMs?");
   if (!confirmed) return;
 
   state.accounts = [];
   state.posts = [];
+  state.dms = [];
+  state.follows = [];
   state.activeAccountId = null;
   state.viewMode = "feed";
   state.currentReelIndex = 0;
@@ -236,6 +277,8 @@ function clearData() {
 function renderAll() {
   renderNav();
   renderAccounts();
+  renderDmSelectors();
+  renderDmThread();
   renderProfileHeader();
   renderFeed();
   renderReels();
@@ -292,6 +335,50 @@ function renderAccounts() {
   activeAccountEl.textContent = active ? `Posting as @${active.username}` : "No account selected";
 }
 
+function renderDmSelectors() {
+  const options = state.accounts
+    .map((account) => `<option value="${account.id}">@${escapeHtml(account.username)}</option>`)
+    .join("");
+
+  dmFrom.innerHTML = `<option value="">From</option>${options}`;
+  dmTo.innerHTML = `<option value="">To</option>${options}`;
+
+  if (state.accounts.length >= 2) {
+    dmFrom.value = dmFrom.value || state.accounts[0].id;
+    dmTo.value = dmTo.value || state.accounts[1].id;
+  }
+}
+
+function renderDmThread() {
+  dmThread.innerHTML = "";
+
+  const fromId = dmFrom.value;
+  const toId = dmTo.value;
+
+  if (!fromId || !toId || fromId === toId) {
+    dmThread.innerHTML = '<p class="muted small">Select two different accounts to view/send fake DMs.</p>';
+    return;
+  }
+
+  const messages = state.dms.filter((dm) =>
+    (dm.fromId === fromId && dm.toId === toId) ||
+    (dm.fromId === toId && dm.toId === fromId)
+  );
+
+  if (!messages.length) {
+    dmThread.innerHTML = '<p class="muted small">No messages yet between these accounts.</p>';
+    return;
+  }
+
+  for (const dm of messages) {
+    const sender = state.accounts.find((account) => account.id === dm.fromId);
+    const msg = document.createElement("div");
+    msg.className = `dm-msg ${dm.fromId === fromId ? "self" : "other"}`;
+    msg.innerHTML = `<strong>${sender ? `@${escapeHtml(sender.username)}` : "@deleted"}</strong><br>${escapeHtml(dm.text)}`;
+    dmThread.append(msg);
+  }
+}
+
 function renderProfileHeader() {
   if (state.viewMode !== "profile") {
     profileHeader.classList.add("hidden");
@@ -306,8 +393,9 @@ function renderProfileHeader() {
   }
 
   const postsCount = countPostsByAccount(account.id);
-  const followers = 120 + postsCount * 13;
-  const following = 80 + Math.floor(postsCount / 2);
+  const followers = getFollowersCount(account.id);
+  const following = getFollowingCount(account.id);
+  const isFollowing = isFollowingActive(account.id);
 
   profileHeader.classList.remove("hidden");
   profileHeader.innerHTML = `
@@ -321,9 +409,15 @@ function renderProfileHeader() {
         <span><strong>${followers}</strong> followers</span>
         <span><strong>${following}</strong> following</span>
       </div>
+      <button type="button" id="follow-btn" class="follow-btn">${isFollowing ? "Following" : "Follow"}</button>
       <p class="muted">Offline creator account • Local only</p>
     </div>
   `;
+
+  const followButton = document.getElementById("follow-btn");
+  if (followButton) {
+    followButton.addEventListener("click", () => toggleFollow(account.id));
+  }
 }
 
 function renderFeed() {
@@ -343,6 +437,10 @@ function renderFeed() {
   }
 
   for (const post of posts) {
+    if (!Array.isArray(post.likes)) {
+      post.likes = [];
+    }
+
     const account = state.accounts.find((item) => item.id === post.accountId);
     const node = postTemplate.content.firstElementChild.cloneNode(true);
 
@@ -354,11 +452,26 @@ function renderFeed() {
 
     const image = node.querySelector(".post-image");
     image.src = post.imageDataUrl;
+    image.addEventListener("click", () => openPost(post.id));
 
     node.querySelector(".post-caption").textContent = post.caption;
-    node.querySelector(".post-comments-count").textContent = `${post.comments.length} comments • click to open`;
+    node.querySelector(".post-likes-count").textContent = `${post.likes.length} likes`;
+    node.querySelector(".post-comments-count").textContent = `${post.comments.length} comments`;
 
-    node.addEventListener("click", () => openPost(post.id));
+    const likeButton = node.querySelector(".like-btn");
+    likeButton.classList.toggle("liked", isLikedByActive(post));
+    likeButton.textContent = isLikedByActive(post) ? "♥ Liked" : "♡ Like";
+    likeButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleLike(post.id);
+    });
+
+    const commentButton = node.querySelector(".comment-btn");
+    commentButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openPost(post.id);
+    });
+
     node.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -396,7 +509,7 @@ function renderReels() {
         <strong>${account ? `@${escapeHtml(account.username)}` : "@deleted-account"}</strong>
       </div>
       <p>${escapeHtml(post.caption || "")}</p>
-      <p class="muted small">${formatDate(post.createdAt)} • ${post.comments.length} comments</p>
+      <p class="muted small">${formatDate(post.createdAt)} • ${post.likes?.length || 0} likes • ${post.comments.length} comments</p>
     </div>
   `;
 
@@ -410,6 +523,69 @@ function nextReel() {
   if (!state.posts.length) return;
   state.currentReelIndex = (state.currentReelIndex + 1) % state.posts.length;
   renderReels();
+}
+
+function toggleLike(postId) {
+  const active = getActiveAccount();
+  if (!active) {
+    alert("Select an account first.");
+    return;
+  }
+
+  const post = state.posts.find((item) => item.id === postId);
+  if (!post) return;
+
+  if (!Array.isArray(post.likes)) {
+    post.likes = [];
+  }
+
+  const index = post.likes.indexOf(active.id);
+  if (index === -1) {
+    post.likes.push(active.id);
+  } else {
+    post.likes.splice(index, 1);
+  }
+
+  persist();
+  renderFeed();
+  renderReels();
+}
+
+function isLikedByActive(post) {
+  const active = getActiveAccount();
+  return Boolean(active && Array.isArray(post.likes) && post.likes.includes(active.id));
+}
+
+function toggleFollow(targetId) {
+  const active = getActiveAccount();
+  if (!active || active.id === targetId) return;
+
+  const index = state.follows.findIndex((item) => item.followerId === active.id && item.followingId === targetId);
+
+  if (index === -1) {
+    state.follows.push({ followerId: active.id, followingId: targetId });
+  } else {
+    state.follows.splice(index, 1);
+  }
+
+  persist();
+  renderProfileHeader();
+}
+
+function isFollowingActive(targetId) {
+  const active = getActiveAccount();
+  if (!active || active.id === targetId) return false;
+  return state.follows.some((item) => item.followerId === active.id && item.followingId === targetId);
+}
+
+function getFollowersCount(accountId) {
+  const fromFollows = state.follows.filter((item) => item.followingId === accountId).length;
+  return 120 + fromFollows;
+}
+
+function getFollowingCount(accountId) {
+  const fromFollows = state.follows.filter((item) => item.followerId === accountId).length;
+  return 80 + fromFollows;
 }
 
 function openPost(postId) {
