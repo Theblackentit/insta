@@ -1,6 +1,7 @@
 const STORAGE_KEY = "offline-insta-v7";
 const AVATAR_SIZE = 512;
 const POST_SIZE = 1080;
+const MAX_IMAGE_UPLOAD_DIMENSION = 2048;
 
 const state = {
   accounts: [],
@@ -50,6 +51,7 @@ const clearButton = document.getElementById("clear-data");
 const postTemplate = document.getElementById("post-template");
 
 const viewFeedButton = document.getElementById("view-feed");
+const viewPostButton = document.getElementById("view-post");
 const viewExploreButton = document.getElementById("view-explore");
 const viewProfileButton = document.getElementById("view-profile");
 const viewReelsButton = document.getElementById("view-reels");
@@ -110,8 +112,12 @@ function init() {
   clearButton.addEventListener("click", clearData);
 
   viewFeedButton.addEventListener("click", () => setViewMode("feed"));
+  viewPostButton.addEventListener("click", () => setViewMode("post"));
   viewExploreButton.addEventListener("click", () => setViewMode("explore"));
-  viewProfileButton.addEventListener("click", () => setViewMode("profile"));
+  viewProfileButton.addEventListener("click", () => {
+    state.profileViewingId = state.activeAccountId;
+    setViewMode("profile");
+  });
   viewReelsButton.addEventListener("click", () => setViewMode("reels"));
   viewDmButton.addEventListener("click", () => setViewMode("dm"));
 
@@ -175,7 +181,7 @@ function hydrate() {
     state.dms = Array.isArray(parsed.dms) ? parsed.dms : [];
     state.follows = Array.isArray(parsed.follows) ? parsed.follows : [];
     state.activeAccountId = parsed.activeAccountId || null;
-    state.viewMode = ["feed", "explore", "profile", "reels", "dm"].includes(parsed.viewMode) ? parsed.viewMode : "feed";
+    state.viewMode = ["feed", "post", "explore", "profile", "reels", "dm"].includes(parsed.viewMode) ? parsed.viewMode : "feed";
     state.profileViewingId = parsed.profileViewingId || null;
     state.searchQuery = typeof parsed.searchQuery === "string" ? parsed.searchQuery : "";
   } catch {
@@ -184,16 +190,21 @@ function hydrate() {
 }
 
 function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    accounts: state.accounts,
-    posts: state.posts,
-    dms: state.dms,
-    follows: state.follows,
-    activeAccountId: state.activeAccountId,
-    viewMode: state.viewMode,
-    profileViewingId: state.profileViewingId,
-    searchQuery: state.searchQuery,
-  }));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      accounts: state.accounts,
+      posts: state.posts,
+      dms: state.dms,
+      follows: state.follows,
+      activeAccountId: state.activeAccountId,
+      viewMode: state.viewMode,
+      profileViewingId: state.profileViewingId,
+      searchQuery: state.searchQuery,
+    }));
+  } catch (error) {
+    console.error("Unable to save app state", error);
+    alert("Image data is too large to save. Try cropping or using a smaller image.");
+  }
 }
 
 function ensureActiveAccount() {
@@ -243,7 +254,7 @@ async function handleCreateAccount(event) {
 
 function setActiveAccount(accountId) {
   state.activeAccountId = accountId;
-  if (!state.profileViewingId) state.profileViewingId = accountId;
+  state.profileViewingId = accountId;
   persist();
   renderAll();
 }
@@ -323,8 +334,8 @@ async function handlePostFileChange() {
   }
 
   cropState.target = "post";
-  cropState.tempResult = await fileToDataUrl(file);
-  alert("Post image kept uncropped.");
+  cropState.tempResult = await normalizeImageFile(file, POST_SIZE, 0.9);
+  alert("Post image kept uncropped and optimized.");
 }
 
 function clearData() {
@@ -360,13 +371,14 @@ function renderAll() {
 function renderModeSections() {
   const isDm = state.viewMode === "dm";
   dmPanel.classList.toggle("hidden", !isDm);
-  composeCard.classList.toggle("hidden", isDm);
+  composeCard.classList.toggle("hidden", state.viewMode !== "post");
   profileHeader.classList.toggle("hidden", isDm || state.viewMode !== "profile");
   feedEl.classList.toggle("hidden", isDm || state.viewMode === "reels");
 }
 
 function renderNav() {
   viewFeedButton.classList.toggle("active", state.viewMode === "feed");
+  viewPostButton.classList.toggle("active", state.viewMode === "post");
   viewExploreButton.classList.toggle("active", state.viewMode === "explore");
   viewProfileButton.classList.toggle("active", state.viewMode === "profile");
   viewReelsButton.classList.toggle("active", state.viewMode === "reels");
@@ -375,7 +387,8 @@ function renderNav() {
   if (state.viewMode === "profile") {
     const viewing = getViewingAccount();
     viewTitleEl.textContent = viewing ? `@${viewing.username}` : "Profile";
-  } else if (state.viewMode === "explore") viewTitleEl.textContent = "Explore";
+  } else if (state.viewMode === "post") viewTitleEl.textContent = "Create post";
+  else if (state.viewMode === "explore") viewTitleEl.textContent = "Explore";
   else if (state.viewMode === "reels") viewTitleEl.textContent = "Reels";
   else if (state.viewMode === "dm") viewTitleEl.textContent = "Messages";
   else viewTitleEl.textContent = "Home feed";
@@ -771,7 +784,7 @@ async function startCrop(target) {
 
   cropState.target = target;
   cropState.file = file;
-  cropState.image = await loadImage(await fileToDataUrl(file));
+  cropState.image = await loadImage(await normalizeImageFile(file, MAX_IMAGE_UPLOAD_DIMENSION, 0.92));
   cropState.outputSize = target === "avatar" ? AVATAR_SIZE : POST_SIZE;
   cropState.zoom = 1;
   cropState.x = 0;
@@ -839,6 +852,23 @@ function applyCropResult() {
 
   closeCropDialog();
   alert(`${cropState.target === "avatar" ? "Profile picture" : "Post image"} crop applied.`);
+}
+
+async function normalizeImageFile(file, maxDimension = POST_SIZE, quality = 0.92) {
+  const sourceImage = await loadImage(await fileToDataUrl(file));
+  const largestSide = Math.max(sourceImage.width, sourceImage.height);
+  if (largestSide <= maxDimension) return sourceImage.src;
+
+  const scale = maxDimension / largestSide;
+  const targetWidth = Math.max(1, Math.round(sourceImage.width * scale));
+  const targetHeight = Math.max(1, Math.round(sourceImage.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return sourceImage.src;
+  context.drawImage(sourceImage, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL("image/jpeg", quality);
 }
 
 function fileToDataUrl(file) {
