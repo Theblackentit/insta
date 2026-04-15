@@ -29,6 +29,7 @@ const cropState = {
   baseScale: 1,
   outputSize: AVATAR_SIZE,
   tempResult: null,
+  tempMediaType: "image",
   dragging: false,
   dragStartX: 0,
   dragStartY: 0,
@@ -68,6 +69,7 @@ const nextReelButton = document.getElementById("next-reel");
 const postModal = document.getElementById("post-modal");
 const closeModalButton = document.getElementById("close-modal");
 const modalImage = document.getElementById("modal-image");
+const modalVideo = document.getElementById("modal-video");
 const modalAvatar = document.getElementById("modal-avatar");
 const modalUser = document.getElementById("modal-user");
 const modalUserTrigger = document.getElementById("modal-user-trigger");
@@ -270,6 +272,7 @@ async function handleCreatePost(event) {
     id: crypto.randomUUID(),
     accountId: state.activeAccountId,
     imageDataUrl: cropState.tempResult,
+    mediaType: cropState.tempMediaType || "image",
     caption,
     comments: [],
     likes: [],
@@ -277,6 +280,7 @@ async function handleCreatePost(event) {
   });
 
   cropState.tempResult = null;
+  cropState.tempMediaType = "image";
   postForm.reset();
   persist();
   renderAll();
@@ -317,9 +321,17 @@ function handleSendDm(event) {
 async function handlePostFileChange() {
   const file = postInput.files?.[0];
   if (!file) return;
-  if (!file.type.startsWith("image/")) {
-    alert("Please select an image file.");
+  if (!file.type.startsWith("image/") && file.type !== "video/mp4") {
+    alert("Please select an image or MP4 video file.");
     postInput.value = "";
+    return;
+  }
+
+  if (file.type === "video/mp4") {
+    cropState.target = "post";
+    cropState.tempMediaType = "video";
+    cropState.tempResult = await fileToDataUrl(file);
+    alert("MP4 video ready to post.");
     return;
   }
 
@@ -330,6 +342,7 @@ async function handlePostFileChange() {
   }
 
   cropState.target = "post";
+  cropState.tempMediaType = "image";
   cropState.tempResult = await normalizeImageFile(file, POST_SIZE, 0.9);
   alert("Post image kept uncropped and optimized.");
 }
@@ -615,7 +628,9 @@ function renderFeed() {
     posts.forEach((post, index) => {
       const tile = document.createElement("article");
       tile.className = `explore-tile ${index % 7 === 2 ? "tall" : ""} ${index % 11 === 4 ? "wide" : ""}`;
-      tile.innerHTML = `<img src="${post.imageDataUrl}" alt="Explore post" />`;
+      tile.innerHTML = post.mediaType === "video"
+        ? `<video src="${post.imageDataUrl}" muted playsinline preload="metadata"></video>`
+        : `<img src="${post.imageDataUrl}" alt="Explore post" />`;
       tile.addEventListener("click", () => openPost(post.id));
       feedEl.append(tile);
     });
@@ -636,9 +651,19 @@ function renderFeed() {
     userButton.addEventListener("click", () => openProfile(account?.id));
 
     node.querySelector(".post-time").textContent = formatDate(post.createdAt);
-    const image = node.querySelector(".post-image");
-    image.src = post.imageDataUrl;
-    image.addEventListener("click", () => openPost(post.id));
+    const media = node.querySelector(".post-image");
+    if (post.mediaType === "video") {
+      const video = document.createElement("video");
+      video.className = "post-image";
+      video.src = post.imageDataUrl;
+      video.controls = true;
+      video.playsInline = true;
+      video.preload = "metadata";
+      media.replaceWith(video);
+    } else {
+      media.src = post.imageDataUrl;
+      media.addEventListener("click", () => openPost(post.id));
+    }
 
     node.querySelector(".post-caption").textContent = post.caption;
     node.querySelector(".post-likes-count").textContent = `${post.likes.length} likes`;
@@ -669,9 +694,12 @@ function renderReels() {
   const post = state.posts[state.currentReelIndex];
   const account = state.accounts.find((item) => item.id === post.accountId);
 
-  reelStage.innerHTML = `<img src="${post.imageDataUrl}" alt="Reel image" id="reel-image" /><div class="reel-meta"><div class="user-line"><img class="avatar" src="${getAvatar(account)}" alt="avatar" /><strong>@${escapeHtml(account?.username || "deleted")}</strong></div><p>${escapeHtml(post.caption || "")}</p></div>`;
-  const reelImage = document.getElementById("reel-image");
-  if (reelImage) reelImage.addEventListener("click", () => openPost(post.id));
+  const reelMedia = post.mediaType === "video"
+    ? `<video src="${post.imageDataUrl}" id="reel-media" controls autoplay muted loop playsinline></video>`
+    : `<img src="${post.imageDataUrl}" alt="Reel image" id="reel-media" />`;
+  reelStage.innerHTML = `${reelMedia}<div class="reel-meta"><div class="user-line"><img class="avatar" src="${getAvatar(account)}" alt="avatar" /><strong>@${escapeHtml(account?.username || "deleted")}</strong></div><p>${escapeHtml(post.caption || "")}</p></div>`;
+  const reelImage = document.getElementById("reel-media");
+  if (reelImage && post.mediaType !== "video") reelImage.addEventListener("click", () => openPost(post.id));
 }
 
 function nextReel() {
@@ -736,7 +764,17 @@ function openPost(postId) {
 
 function renderPostModal(post) {
   const account = state.accounts.find((item) => item.id === post.accountId);
-  modalImage.src = post.imageDataUrl;
+  if (post.mediaType === "video") {
+    modalImage.classList.add("hidden");
+    modalVideo.classList.remove("hidden");
+    modalVideo.src = post.imageDataUrl;
+  } else {
+    modalVideo.classList.add("hidden");
+    modalVideo.pause();
+    modalVideo.src = "";
+    modalImage.classList.remove("hidden");
+    modalImage.src = post.imageDataUrl;
+  }
   modalAvatar.src = getAvatar(account);
   modalUser.textContent = account ? `@${account.username}` : "@deleted";
   modalCaption.textContent = post.caption;
@@ -774,6 +812,8 @@ function renderPostModal(post) {
 
 function closeModal() {
   if (postModal.open) postModal.close();
+  modalVideo.pause();
+  modalVideo.src = "";
   state.selectedPostId = null;
 }
 
@@ -840,6 +880,7 @@ async function startCrop(target) {
 
   cropState.target = target;
   cropState.file = file;
+  cropState.tempMediaType = "image";
   cropState.image = await loadImage(await normalizeImageFile(file, MAX_IMAGE_UPLOAD_DIMENSION, 0.92));
   cropState.outputSize = target === "avatar" ? AVATAR_SIZE : POST_SIZE;
   cropState.zoom = 1;
