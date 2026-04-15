@@ -28,8 +28,8 @@ button.ghost{background:transparent;border-color:var(--border)}
 .dm-msg{padding:.45rem .55rem;border-radius:10px;border:1px solid var(--border);background:#111}
 .dm-msg.self{margin-left:auto;max-width:80%;background:#16202a;border-color:#193a55}
 .dm-msg.other{margin-right:auto;max-width:80%}
-.profile-header{border-bottom:1px solid var(--border);padding:.8rem 0 1.3rem;margin-bottom:.95rem;display:grid;grid-template-columns:150px 1fr;gap:1rem;align-items:center}
-.profile-avatar-wrap{width:140px;height:140px;border-radius:50%;padding:3px;background:conic-gradient(#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75)}
+.profile-header{border-bottom:1px solid var(--border);padding:.8rem 0 1.3rem;margin-bottom:.95rem;display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:center}
+.profile-avatar-wrap{width:min(512px,60vw);height:min(512px,60vw);max-width:512px;max-height:512px;border-radius:50%;padding:3px;background:conic-gradient(#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5,#feda75)}
 .profile-avatar{width:100%;height:100%;border-radius:50%;border:3px solid #000;object-fit:cover}
 .profile-stats{display:flex;gap:1rem;margin:.4rem 0}
 .follow-lists{margin-top:.55rem;display:grid;gap:.35rem}
@@ -74,3 +74,5 @@ button.ghost{background:transparent;border-color:var(--border)}
 .inline-actions{display:flex;justify-content:flex-end;gap:.5rem}
 .muted{color:var(--muted)}.small{font-size:.86rem}.hidden{display:none!important}.empty{border:1px dashed var(--border);border-radius:10px;padding:1rem;color:var(--muted);grid-column:1/-1}
 @media (max-width:1020px){.app-shell{grid-template-columns:1fr}.ig-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--border)}.feed{grid-template-columns:repeat(2,minmax(0,1fr))}.modal-content{grid-template-columns:1fr}.modal-meta{border-left:0;border-top:1px solid var(--border)}.top-actions{flex-direction:column;align-items:stretch}#search-input{width:100%}}
+
+.reel-meta .avatar{width:256px;height:256px;max-width:40vw;max-height:40vw;border-width:2px}

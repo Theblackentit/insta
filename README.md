@@ -5,8 +5,8 @@ A polished, fully offline Instagram-style app built with plain HTML/CSS/JS.
 ## Features
 
 - Create and switch between custom accounts.
-- Visual image crop dialog for avatars and posts (drag image + zoom, then apply).
-- Avatar output normalized to `256x256`; post output normalized to square `1080x1080`.
+- Visual image crop dialog for avatars (always) and optional crop flow for posts.
+- Avatar output normalized to `512x512`; posts can be kept uncropped or cropped to square `1080x1080`.
 - Home feed and Explore collage view (image-only discover grid).
 - Search accounts and captions, with account results that support follow directly.
 - Clickable usernames/avatars on posts/comments to open that account profile.

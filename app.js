@@ -1,5 +1,5 @@
 const STORAGE_KEY = "offline-insta-v7";
-const AVATAR_SIZE = 256;
+const AVATAR_SIZE = 512;
 const POST_SIZE = 1080;
 
 const state = {
@@ -95,7 +95,7 @@ function init() {
   dmForm.addEventListener("submit", handleSendDm);
 
   avatarInput.addEventListener("change", () => startCrop("avatar"));
-  postInput.addEventListener("change", () => startCrop("post"));
+  postInput.addEventListener("change", handlePostFileChange);
 
   dmFrom.addEventListener("change", renderDmThread);
   dmTo.addEventListener("change", renderDmThread);
@@ -304,6 +304,27 @@ function handleSendDm(event) {
   textInput.value = "";
   persist();
   renderDmThread();
+}
+
+
+async function handlePostFileChange() {
+  const file = postInput.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    alert("Please select an image file.");
+    postInput.value = "";
+    return;
+  }
+
+  const shouldCrop = confirm("Do you want to crop this post image before uploading?");
+  if (shouldCrop) {
+    await startCrop("post");
+    return;
+  }
+
+  cropState.target = "post";
+  cropState.tempResult = await fileToDataUrl(file);
+  alert("Post image kept uncropped.");
 }
 
 function clearData() {
