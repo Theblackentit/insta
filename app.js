@@ -15,6 +15,7 @@ const state = {
   viewMode: "feed",
   profileViewingId: null,
   selectedPostId: null,
+  selectedPostMediaIndex: 0,
   currentReelIndex: 0,
   searchQuery: "",
 };
@@ -30,6 +31,7 @@ const cropState = {
   outputSize: AVATAR_SIZE,
   tempResult: null,
   tempMediaType: "image",
+  tempPostMediaItems: [],
   dragging: false,
   dragStartX: 0,
   dragStartY: 0,
@@ -70,6 +72,9 @@ const postModal = document.getElementById("post-modal");
 const closeModalButton = document.getElementById("close-modal");
 const modalImage = document.getElementById("modal-image");
 const modalVideo = document.getElementById("modal-video");
+const modalPrevMedia = document.getElementById("modal-prev-media");
+const modalNextMedia = document.getElementById("modal-next-media");
+const modalMediaCount = document.getElementById("modal-media-count");
 const modalAvatar = document.getElementById("modal-avatar");
 const modalUser = document.getElementById("modal-user");
 const modalUserTrigger = document.getElementById("modal-user-trigger");
@@ -137,6 +142,8 @@ async function init() {
   });
 
   closeModalButton.addEventListener("click", closeModal);
+  modalPrevMedia.addEventListener("click", () => shiftPostMedia(-1));
+  modalNextMedia.addEventListener("click", () => shiftPostMedia(1));
   postModal.addEventListener("click", (event) => {
     if (event.target instanceof HTMLElement && event.target.tagName === "DIALOG") closeModal();
   });
@@ -264,15 +271,20 @@ async function handleCreatePost(event) {
   const data = new FormData(postForm);
   const caption = String(data.get("caption") || "").trim();
 
-  if (!cropState.tempResult || cropState.target !== "post") {
-    return alert("Choose an image and apply crop first.");
+  const mediaItems = cropState.tempPostMediaItems.length
+    ? cropState.tempPostMediaItems
+    : [{ type: cropState.tempMediaType || "image", dataUrl: cropState.tempResult }];
+
+  if (!mediaItems[0]?.dataUrl || cropState.target !== "post") {
+    return alert("Choose media first.");
   }
 
   state.posts.unshift({
     id: crypto.randomUUID(),
     accountId: state.activeAccountId,
-    imageDataUrl: cropState.tempResult,
-    mediaType: cropState.tempMediaType || "image",
+    imageDataUrl: mediaItems[0].dataUrl,
+    mediaType: mediaItems[0].type,
+    mediaItems,
     caption,
     comments: [],
     likes: [],
@@ -281,6 +293,7 @@ async function handleCreatePost(event) {
 
   cropState.tempResult = null;
   cropState.tempMediaType = "image";
+  cropState.tempPostMediaItems = [];
   postForm.reset();
   persist();
   renderAll();
@@ -319,13 +332,35 @@ function handleSendDm(event) {
 
 
 async function handlePostFileChange() {
-  const file = postInput.files?.[0];
-  if (!file) return;
-  if (!file.type.startsWith("image/") && file.type !== "video/mp4") {
+  const files = Array.from(postInput.files || []);
+  if (!files.length) return;
+
+  if (files.some((file) => !file.type.startsWith("image/") && file.type !== "video/mp4")) {
     alert("Please select an image or MP4 video file.");
     postInput.value = "";
     return;
   }
+
+  if (files.length > 1) {
+    if (files.some((file) => !file.type.startsWith("image/"))) {
+      alert("Slideshows currently support images only.");
+      postInput.value = "";
+      return;
+    }
+    const mediaItems = await Promise.all(files.map(async (file) => ({
+      type: "image",
+      dataUrl: await normalizeImageFile(file, POST_SIZE, 0.9),
+    })));
+    cropState.target = "post";
+    cropState.tempPostMediaItems = mediaItems;
+    cropState.tempMediaType = "image";
+    cropState.tempResult = mediaItems[0]?.dataUrl || null;
+    alert(`Slideshow ready with ${mediaItems.length} images.`);
+    return;
+  }
+
+  const file = files[0];
+  cropState.tempPostMediaItems = [];
 
   if (file.type === "video/mp4") {
     cropState.target = "post";
@@ -359,6 +394,7 @@ function clearData() {
   state.searchQuery = "";
   state.currentReelIndex = 0;
   state.selectedPostId = null;
+  state.selectedPostMediaIndex = 0;
   clearPersistedState().catch((error) => console.error("Unable to clear app data", error));
   renderAll();
   closeModal();
@@ -626,11 +662,13 @@ function renderFeed() {
 
   if (state.viewMode === "explore") {
     posts.forEach((post, index) => {
+      const firstMedia = getPostMediaItems(post)[0];
+      if (!firstMedia) return;
       const tile = document.createElement("article");
       tile.className = `explore-tile ${index % 7 === 2 ? "tall" : ""} ${index % 11 === 4 ? "wide" : ""}`;
-      tile.innerHTML = post.mediaType === "video"
-        ? `<video src="${post.imageDataUrl}" muted playsinline preload="metadata"></video>`
-        : `<img src="${post.imageDataUrl}" alt="Explore post" />`;
+      tile.innerHTML = firstMedia.type === "video"
+        ? `<video src="${firstMedia.dataUrl}" muted playsinline preload="metadata"></video>`
+        : `<img src="${firstMedia.dataUrl}" alt="Explore post" />`;
       tile.addEventListener("click", () => openPost(post.id));
       feedEl.append(tile);
     });
@@ -639,6 +677,9 @@ function renderFeed() {
 
   for (const post of posts) {
     if (!Array.isArray(post.likes)) post.likes = [];
+    const mediaItems = getPostMediaItems(post);
+    const firstMedia = mediaItems[0];
+    if (!firstMedia) continue;
     const account = state.accounts.find((item) => item.id === post.accountId);
     const node = postTemplate.content.firstElementChild.cloneNode(true);
 
@@ -652,17 +693,24 @@ function renderFeed() {
 
     node.querySelector(".post-time").textContent = formatDate(post.createdAt);
     const media = node.querySelector(".post-image");
-    if (post.mediaType === "video") {
+    if (firstMedia.type === "video") {
       const video = document.createElement("video");
       video.className = "post-image";
-      video.src = post.imageDataUrl;
+      video.src = firstMedia.dataUrl;
       video.controls = true;
       video.playsInline = true;
       video.preload = "metadata";
       media.replaceWith(video);
     } else {
-      media.src = post.imageDataUrl;
+      media.src = firstMedia.dataUrl;
       media.addEventListener("click", () => openPost(post.id));
+    }
+
+    if (mediaItems.length > 1) {
+      const count = document.createElement("p");
+      count.className = "muted small";
+      count.textContent = `${mediaItems.length} slides`;
+      node.querySelector(".post-footer").prepend(count);
     }
 
     node.querySelector(".post-caption").textContent = post.caption;
@@ -692,14 +740,16 @@ function renderReels() {
 
   if (state.currentReelIndex >= state.posts.length) state.currentReelIndex = 0;
   const post = state.posts[state.currentReelIndex];
+  const firstMedia = getPostMediaItems(post)[0];
+  if (!firstMedia) return;
   const account = state.accounts.find((item) => item.id === post.accountId);
 
-  const reelMedia = post.mediaType === "video"
-    ? `<video src="${post.imageDataUrl}" id="reel-media" controls autoplay muted loop playsinline></video>`
-    : `<img src="${post.imageDataUrl}" alt="Reel image" id="reel-media" />`;
+  const reelMedia = firstMedia.type === "video"
+    ? `<video src="${firstMedia.dataUrl}" id="reel-media" controls autoplay muted loop playsinline></video>`
+    : `<img src="${firstMedia.dataUrl}" alt="Reel image" id="reel-media" />`;
   reelStage.innerHTML = `${reelMedia}<div class="reel-meta"><div class="user-line"><img class="avatar" src="${getAvatar(account)}" alt="avatar" /><strong>@${escapeHtml(account?.username || "deleted")}</strong></div><p>${escapeHtml(post.caption || "")}</p></div>`;
   const reelImage = document.getElementById("reel-media");
-  if (reelImage && post.mediaType !== "video") reelImage.addEventListener("click", () => openPost(post.id));
+  if (reelImage && firstMedia.type !== "video") reelImage.addEventListener("click", () => openPost(post.id));
 }
 
 function nextReel() {
@@ -758,23 +808,36 @@ function openPost(postId) {
   const post = state.posts.find((item) => item.id === postId);
   if (!post) return;
   state.selectedPostId = post.id;
+  state.selectedPostMediaIndex = 0;
   renderPostModal(post);
   if (!postModal.open) postModal.showModal();
 }
 
 function renderPostModal(post) {
   const account = state.accounts.find((item) => item.id === post.accountId);
-  if (post.mediaType === "video") {
+  const mediaItems = getPostMediaItems(post);
+  if (!mediaItems.length) return;
+  if (state.selectedPostMediaIndex >= mediaItems.length) state.selectedPostMediaIndex = 0;
+  if (state.selectedPostMediaIndex < 0) state.selectedPostMediaIndex = mediaItems.length - 1;
+  const currentMedia = mediaItems[state.selectedPostMediaIndex];
+
+  if (currentMedia.type === "video") {
     modalImage.classList.add("hidden");
     modalVideo.classList.remove("hidden");
-    modalVideo.src = post.imageDataUrl;
+    modalVideo.src = currentMedia.dataUrl;
   } else {
     modalVideo.classList.add("hidden");
     modalVideo.pause();
     modalVideo.src = "";
     modalImage.classList.remove("hidden");
-    modalImage.src = post.imageDataUrl;
+    modalImage.src = currentMedia.dataUrl;
   }
+  const hasMultipleMedia = mediaItems.length > 1;
+  modalPrevMedia.classList.toggle("hidden", !hasMultipleMedia);
+  modalNextMedia.classList.toggle("hidden", !hasMultipleMedia);
+  modalMediaCount.classList.toggle("hidden", !hasMultipleMedia);
+  modalMediaCount.textContent = hasMultipleMedia ? `${state.selectedPostMediaIndex + 1}/${mediaItems.length}` : "";
+
   modalAvatar.src = getAvatar(account);
   modalUser.textContent = account ? `@${account.username}` : "@deleted";
   modalCaption.textContent = post.caption;
@@ -815,6 +878,23 @@ function closeModal() {
   modalVideo.pause();
   modalVideo.src = "";
   state.selectedPostId = null;
+  state.selectedPostMediaIndex = 0;
+}
+
+function shiftPostMedia(delta) {
+  if (!state.selectedPostId) return;
+  const post = state.posts.find((item) => item.id === state.selectedPostId);
+  if (!post) return;
+  const mediaItems = getPostMediaItems(post);
+  if (mediaItems.length < 2) return;
+  state.selectedPostMediaIndex = (state.selectedPostMediaIndex + delta + mediaItems.length) % mediaItems.length;
+  renderPostModal(post);
+}
+
+function getPostMediaItems(post) {
+  if (Array.isArray(post.mediaItems) && post.mediaItems.length) return post.mediaItems;
+  if (post.imageDataUrl) return [{ type: post.mediaType || "image", dataUrl: post.imageDataUrl }];
+  return [];
 }
 
 function getVisiblePosts() {
@@ -881,6 +961,7 @@ async function startCrop(target) {
   cropState.target = target;
   cropState.file = file;
   cropState.tempMediaType = "image";
+  cropState.tempPostMediaItems = [];
   cropState.image = await loadImage(await normalizeImageFile(file, MAX_IMAGE_UPLOAD_DIMENSION, 0.92));
   cropState.outputSize = target === "avatar" ? AVATAR_SIZE : POST_SIZE;
   cropState.zoom = 1;
@@ -946,6 +1027,7 @@ function applyCropResult() {
 
   context.drawImage(cropState.image, sourceX, sourceY, sourceSide, sourceSide, 0, 0, cropState.outputSize, cropState.outputSize);
   cropState.tempResult = canvas.toDataURL("image/jpeg", 0.92);
+  cropState.tempPostMediaItems = [{ type: "image", dataUrl: cropState.tempResult }];
 
   closeCropDialog();
   alert(`${cropState.target === "avatar" ? "Profile picture" : "Post image"} crop applied.`);
