@@ -22,13 +22,8 @@
           <h2>Create account</h2>
           <form id="account-form" class="stack">
             <input id="username" name="username" type="text" maxlength="24" placeholder="username" required />
-            <label for="avatar" class="muted small">Profile picture (crop + resize to 256x256)</label>
+            <label for="avatar" class="muted small">Profile picture (click to crop)</label>
             <input id="avatar" name="avatar" type="file" accept="image/*" />
-            <div class="crop-grid small muted">
-              <label>Zoom <input id="avatar-zoom" type="range" min="1" max="3" step="0.05" value="1" /></label>
-              <label>X <input id="avatar-x" type="range" min="-1" max="1" step="0.01" value="0" /></label>
-              <label>Y <input id="avatar-y" type="range" min="-1" max="1" step="0.01" value="0" /></label>
-            </div>
             <button type="submit">Add account</button>
           </form>
         </section>
@@ -43,21 +38,18 @@
         <header class="ig-topbar">
           <h1 id="view-title">Home feed</h1>
           <div class="top-actions">
-            <input id="search-input" type="search" placeholder="Search users/captions" />
+            <input id="search-input" type="search" placeholder="Search accounts or captions" />
             <button id="clear-data" class="ghost" type="button">Reset local data</button>
           </div>
         </header>
+
+        <section id="search-results" class="search-results hidden"></section>
 
         <section id="compose-card" class="compose-card">
           <p id="active-account" class="muted">No account selected</p>
           <form id="post-form" class="stack">
             <input id="photo" name="photo" type="file" accept="image/*" required />
             <textarea id="caption" name="caption" rows="3" maxlength="220" placeholder="Write a caption..."></textarea>
-            <div class="crop-grid small muted">
-              <label>Zoom <input id="post-zoom" type="range" min="1" max="3" step="0.05" value="1" /></label>
-              <label>X <input id="post-x" type="range" min="-1" max="1" step="0.01" value="0" /></label>
-              <label>Y <input id="post-y" type="range" min="-1" max="1" step="0.01" value="0" /></label>
-            </div>
             <button type="submit">Post</button>
           </form>
         </section>
@@ -91,9 +83,11 @@
       <article class="post" tabindex="0">
         <header class="post-head">
           <div class="user-line">
-            <img class="avatar" alt="Profile picture" />
+            <button type="button" class="user-trigger">
+              <img class="avatar" alt="Profile picture" />
+            </button>
             <div>
-              <strong class="post-user"></strong>
+              <button type="button" class="post-user user-trigger-text"></button>
               <p class="post-time muted small"></p>
             </div>
           </div>
@@ -117,9 +111,11 @@
         <img id="modal-image" class="modal-image" alt="Selected post" />
         <div class="modal-meta">
           <div class="user-line">
-            <img id="modal-avatar" class="avatar" alt="Profile picture" />
+            <button type="button" id="modal-user-trigger" class="user-trigger">
+              <img id="modal-avatar" class="avatar" alt="Profile picture" />
+            </button>
             <div>
-              <h3 id="modal-user"></h3>
+              <button type="button" id="modal-user" class="user-trigger-text"></button>
               <p id="modal-time" class="muted small"></p>
             </div>
           </div>
@@ -132,6 +128,20 @@
           </form>
         </div>
       </article>
+    </dialog>
+
+    <dialog id="crop-dialog" class="crop-dialog">
+      <section class="crop-panel">
+        <h3 id="crop-title">Crop image</h3>
+        <div id="crop-viewport" class="crop-viewport">
+          <img id="crop-image" alt="Crop preview" />
+        </div>
+        <label class="small">Zoom <input id="crop-zoom" type="range" min="1" max="3" step="0.01" value="1" /></label>
+        <div class="inline-actions">
+          <button type="button" id="cancel-crop" class="ghost">Cancel</button>
+          <button type="button" id="apply-crop">Apply Crop</button>
+        </div>
+      </section>
     </dialog>
 
     <script src="app.js"></script>
