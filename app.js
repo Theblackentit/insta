@@ -1,4 +1,7 @@
 const STORAGE_KEY = "offline-insta-v7";
+const DB_NAME = "offline-insta-db-v1";
+const DB_STORE = "app_state";
+const DB_STATE_KEY = "primary";
 const AVATAR_SIZE = 512;
 const POST_SIZE = 1080;
 const MAX_IMAGE_UPLOAD_DIMENSION = 2048;
@@ -85,8 +88,8 @@ const postInput = document.getElementById("photo");
 
 init();
 
-function init() {
-  hydrate();
+async function init() {
+  await hydrate();
   ensureActiveAccount();
   searchInput.value = state.searchQuery;
   renderAll();
@@ -170,41 +173,34 @@ function init() {
   applyCrop.addEventListener("click", applyCropResult);
 }
 
-function hydrate() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return;
+async function hydrate() {
+  const parsed = await readPersistedState();
+  if (!parsed) return;
 
-  try {
-    const parsed = JSON.parse(saved);
-    state.accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
-    state.posts = Array.isArray(parsed.posts) ? parsed.posts : [];
-    state.dms = Array.isArray(parsed.dms) ? parsed.dms : [];
-    state.follows = Array.isArray(parsed.follows) ? parsed.follows : [];
-    state.activeAccountId = parsed.activeAccountId || null;
-    state.viewMode = ["feed", "post", "explore", "profile", "reels", "dm"].includes(parsed.viewMode) ? parsed.viewMode : "feed";
-    state.profileViewingId = parsed.profileViewingId || null;
-    state.searchQuery = typeof parsed.searchQuery === "string" ? parsed.searchQuery : "";
-  } catch {
-    localStorage.removeItem(STORAGE_KEY);
-  }
+  state.accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
+  state.posts = Array.isArray(parsed.posts) ? parsed.posts : [];
+  state.dms = Array.isArray(parsed.dms) ? parsed.dms : [];
+  state.follows = Array.isArray(parsed.follows) ? parsed.follows : [];
+  state.activeAccountId = parsed.activeAccountId || null;
+  state.viewMode = ["feed", "post", "explore", "profile", "reels", "dm"].includes(parsed.viewMode) ? parsed.viewMode : "feed";
+  state.profileViewingId = parsed.profileViewingId || null;
+  state.searchQuery = typeof parsed.searchQuery === "string" ? parsed.searchQuery : "";
 }
 
 function persist() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      accounts: state.accounts,
-      posts: state.posts,
-      dms: state.dms,
-      follows: state.follows,
-      activeAccountId: state.activeAccountId,
-      viewMode: state.viewMode,
-      profileViewingId: state.profileViewingId,
-      searchQuery: state.searchQuery,
-    }));
-  } catch (error) {
+  writePersistedState({
+    accounts: state.accounts,
+    posts: state.posts,
+    dms: state.dms,
+    follows: state.follows,
+    activeAccountId: state.activeAccountId,
+    viewMode: state.viewMode,
+    profileViewingId: state.profileViewingId,
+    searchQuery: state.searchQuery,
+  }).catch((error) => {
     console.error("Unable to save app state", error);
-    alert("Image data is too large to save. Try cropping or using a smaller image.");
-  }
+    alert("Unable to save app data on this device.");
+  });
 }
 
 function ensureActiveAccount() {
@@ -350,9 +346,69 @@ function clearData() {
   state.searchQuery = "";
   state.currentReelIndex = 0;
   state.selectedPostId = null;
-  localStorage.removeItem(STORAGE_KEY);
+  clearPersistedState().catch((error) => console.error("Unable to clear app data", error));
   renderAll();
   closeModal();
+}
+
+function openAppDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readPersistedState() {
+  const db = await openAppDb();
+  const dbResult = await new Promise((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readonly");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.get(DB_STATE_KEY);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+
+  if (dbResult) return dbResult;
+
+  const legacy = localStorage.getItem(STORAGE_KEY);
+  if (!legacy) return null;
+  try {
+    const parsed = JSON.parse(legacy);
+    await writePersistedState(parsed);
+    localStorage.removeItem(STORAGE_KEY);
+    return parsed;
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+    return null;
+  }
+}
+
+async function writePersistedState(data) {
+  const db = await openAppDb();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.put(data, DB_STATE_KEY);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function clearPersistedState() {
+  const db = await openAppDb();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.delete(DB_STATE_KEY);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+  localStorage.removeItem(STORAGE_KEY);
 }
 
 function renderAll() {
