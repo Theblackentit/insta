@@ -14,13 +14,14 @@
           <button id="view-feed" class="nav-btn active" type="button">Home</button>
           <button id="view-profile" class="nav-btn" type="button">Profile</button>
           <button id="view-reels" class="nav-btn" type="button">Reels</button>
+          <button id="view-dm" class="nav-btn" type="button">✉ Messages</button>
         </nav>
 
         <section class="sidebar-card">
           <h2>Create account</h2>
           <form id="account-form" class="stack">
             <input id="username" name="username" type="text" maxlength="24" placeholder="username" required />
-            <label for="avatar" class="muted small">Profile picture (optional)</label>
+            <label for="avatar" class="muted small">Profile picture (auto-cropped to 256x256)</label>
             <input id="avatar" name="avatar" type="file" accept="image/*" />
             <button type="submit">Add account</button>
           </form>
@@ -38,7 +39,7 @@
           <button id="clear-data" class="ghost" type="button">Reset local data</button>
         </header>
 
-        <section class="compose-card">
+        <section id="compose-card" class="compose-card">
           <p id="active-account" class="muted">No account selected</p>
           <form id="post-form" class="stack">
             <input id="photo" name="photo" type="file" accept="image/*" required />
@@ -47,7 +48,7 @@
           </form>
         </section>
 
-        <section class="dm-card">
+        <section id="dm-panel" class="dm-card hidden">
           <h2>Fake DMs</h2>
           <form id="dm-form" class="stack">
             <div class="dm-row">

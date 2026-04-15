@@ -1,4 +1,5 @@
-const STORAGE_KEY = "offline-insta-v4";
+const STORAGE_KEY = "offline-insta-v5";
+const AVATAR_SIZE = 256;
 
 const state = {
   accounts: [],
@@ -18,6 +19,8 @@ const dmForm = document.getElementById("dm-form");
 const dmFrom = document.getElementById("dm-from");
 const dmTo = document.getElementById("dm-to");
 const dmThread = document.getElementById("dm-thread");
+const dmPanel = document.getElementById("dm-panel");
+const composeCard = document.getElementById("compose-card");
 const accountList = document.getElementById("account-list");
 const activeAccountEl = document.getElementById("active-account");
 const profileHeader = document.getElementById("profile-header");
@@ -29,6 +32,7 @@ const postTemplate = document.getElementById("post-template");
 const viewFeedButton = document.getElementById("view-feed");
 const viewProfileButton = document.getElementById("view-profile");
 const viewReelsButton = document.getElementById("view-reels");
+const viewDmButton = document.getElementById("view-dm");
 
 const reelsOverlay = document.getElementById("reels-overlay");
 const reelStage = document.getElementById("reel-stage");
@@ -64,6 +68,7 @@ function init() {
   viewFeedButton.addEventListener("click", () => setViewMode("feed"));
   viewProfileButton.addEventListener("click", () => setViewMode("profile"));
   viewReelsButton.addEventListener("click", () => setViewMode("reels"));
+  viewDmButton.addEventListener("click", () => setViewMode("dm"));
 
   closeReelsButton.addEventListener("click", () => setViewMode("feed"));
   nextReelButton.addEventListener("click", nextReel);
@@ -94,7 +99,7 @@ function hydrate() {
     state.dms = Array.isArray(parsed.dms) ? parsed.dms : [];
     state.follows = Array.isArray(parsed.follows) ? parsed.follows : [];
     state.activeAccountId = parsed.activeAccountId || null;
-    state.viewMode = ["feed", "profile", "reels"].includes(parsed.viewMode)
+    state.viewMode = ["feed", "profile", "reels", "dm"].includes(parsed.viewMode)
       ? parsed.viewMode
       : "feed";
   } catch {
@@ -148,18 +153,16 @@ async function handleCreateAccount(event) {
       return;
     }
 
-    avatarDataUrl = await fileToDataUrl(avatarFile);
+    avatarDataUrl = await fileToSizedSquareDataUrl(avatarFile, AVATAR_SIZE);
   }
 
-  const account = {
+  state.accounts.unshift({
     id: crypto.randomUUID(),
     username,
     avatarDataUrl,
     createdAt: Date.now(),
-  };
-
-  state.accounts.unshift(account);
-  state.activeAccountId = account.id;
+  });
+  state.activeAccountId = state.accounts[0].id;
   state.viewMode = "profile";
 
   persist();
@@ -243,13 +246,7 @@ function handleSendDm(event) {
 
   if (!fromId || !toId || fromId === toId || !text) return;
 
-  state.dms.push({
-    id: crypto.randomUUID(),
-    fromId,
-    toId,
-    text,
-    createdAt: Date.now(),
-  });
+  state.dms.push({ id: crypto.randomUUID(), fromId, toId, text, createdAt: Date.now() });
 
   textInput.value = "";
   persist();
@@ -276,6 +273,7 @@ function clearData() {
 
 function renderAll() {
   renderNav();
+  renderModeSections();
   renderAccounts();
   renderDmSelectors();
   renderDmThread();
@@ -284,16 +282,27 @@ function renderAll() {
   renderReels();
 }
 
+function renderModeSections() {
+  const isDm = state.viewMode === "dm";
+  dmPanel.classList.toggle("hidden", !isDm);
+  composeCard.classList.toggle("hidden", isDm);
+  profileHeader.classList.toggle("hidden", isDm || state.viewMode !== "profile");
+  feedEl.classList.toggle("hidden", isDm || state.viewMode === "reels");
+}
+
 function renderNav() {
   viewFeedButton.classList.toggle("active", state.viewMode === "feed");
   viewProfileButton.classList.toggle("active", state.viewMode === "profile");
   viewReelsButton.classList.toggle("active", state.viewMode === "reels");
+  viewDmButton.classList.toggle("active", state.viewMode === "dm");
 
   if (state.viewMode === "profile") {
     const active = getActiveAccount();
     viewTitleEl.textContent = active ? `${active.username}` : "Profile";
   } else if (state.viewMode === "reels") {
     viewTitleEl.textContent = "Reels";
+  } else if (state.viewMode === "dm") {
+    viewTitleEl.textContent = "Messages";
   } else {
     viewTitleEl.textContent = "Home feed";
   }
@@ -340,13 +349,20 @@ function renderDmSelectors() {
     .map((account) => `<option value="${account.id}">@${escapeHtml(account.username)}</option>`)
     .join("");
 
+  const fromCurrent = dmFrom.value;
+  const toCurrent = dmTo.value;
+
   dmFrom.innerHTML = `<option value="">From</option>${options}`;
   dmTo.innerHTML = `<option value="">To</option>${options}`;
 
   if (state.accounts.length >= 2) {
-    dmFrom.value = dmFrom.value || state.accounts[0].id;
-    dmTo.value = dmTo.value || state.accounts[1].id;
+    dmFrom.value = fromCurrent && hasAccount(fromCurrent) ? fromCurrent : state.accounts[0].id;
+    dmTo.value = toCurrent && hasAccount(toCurrent) ? toCurrent : state.accounts[1].id;
   }
+}
+
+function hasAccount(accountId) {
+  return state.accounts.some((account) => account.id === accountId);
 }
 
 function renderDmThread() {
@@ -381,7 +397,6 @@ function renderDmThread() {
 
 function renderProfileHeader() {
   if (state.viewMode !== "profile") {
-    profileHeader.classList.add("hidden");
     return;
   }
 
@@ -423,12 +438,9 @@ function renderProfileHeader() {
 function renderFeed() {
   feedEl.innerHTML = "";
 
-  if (state.viewMode === "reels") {
-    feedEl.classList.add("hidden");
+  if (state.viewMode === "reels" || state.viewMode === "dm") {
     return;
   }
-
-  feedEl.classList.remove("hidden");
 
   const posts = getVisiblePosts();
   if (!posts.length) {
@@ -446,9 +458,7 @@ function renderFeed() {
 
     node.querySelector(".post-user").textContent = account ? `@${account.username}` : "@deleted-account";
     node.querySelector(".post-time").textContent = formatDate(post.createdAt);
-
-    const avatar = node.querySelector(".avatar");
-    avatar.src = getAvatar(account);
+    node.querySelector(".avatar").src = getAvatar(account);
 
     const image = node.querySelector(".post-image");
     image.src = post.imageDataUrl;
@@ -466,8 +476,7 @@ function renderFeed() {
       toggleLike(post.id);
     });
 
-    const commentButton = node.querySelector(".comment-btn");
-    commentButton.addEventListener("click", (event) => {
+    node.querySelector(".comment-btn").addEventListener("click", (event) => {
       event.stopPropagation();
       openPost(post.id);
     });
@@ -535,16 +544,11 @@ function toggleLike(postId) {
   const post = state.posts.find((item) => item.id === postId);
   if (!post) return;
 
-  if (!Array.isArray(post.likes)) {
-    post.likes = [];
-  }
+  if (!Array.isArray(post.likes)) post.likes = [];
 
   const index = post.likes.indexOf(active.id);
-  if (index === -1) {
-    post.likes.push(active.id);
-  } else {
-    post.likes.splice(index, 1);
-  }
+  if (index === -1) post.likes.push(active.id);
+  else post.likes.splice(index, 1);
 
   persist();
   renderFeed();
@@ -561,12 +565,8 @@ function toggleFollow(targetId) {
   if (!active || active.id === targetId) return;
 
   const index = state.follows.findIndex((item) => item.followerId === active.id && item.followingId === targetId);
-
-  if (index === -1) {
-    state.follows.push({ followerId: active.id, followingId: targetId });
-  } else {
-    state.follows.splice(index, 1);
-  }
+  if (index === -1) state.follows.push({ followerId: active.id, followingId: targetId });
+  else state.follows.splice(index, 1);
 
   persist();
   renderProfileHeader();
@@ -579,13 +579,11 @@ function isFollowingActive(targetId) {
 }
 
 function getFollowersCount(accountId) {
-  const fromFollows = state.follows.filter((item) => item.followingId === accountId).length;
-  return 120 + fromFollows;
+  return 120 + state.follows.filter((item) => item.followingId === accountId).length;
 }
 
 function getFollowingCount(accountId) {
-  const fromFollows = state.follows.filter((item) => item.followerId === accountId).length;
-  return 80 + fromFollows;
+  return 80 + state.follows.filter((item) => item.followerId === accountId).length;
 }
 
 function openPost(postId) {
@@ -595,9 +593,7 @@ function openPost(postId) {
   state.selectedPostId = post.id;
   renderPostModal(post);
 
-  if (!postModal.open) {
-    postModal.showModal();
-  }
+  if (!postModal.open) postModal.showModal();
 }
 
 function renderPostModal(post) {
@@ -627,9 +623,7 @@ function renderPostModal(post) {
 }
 
 function closeModal() {
-  if (postModal.open) {
-    postModal.close();
-  }
+  if (postModal.open) postModal.close();
   state.selectedPostId = null;
 }
 
@@ -638,7 +632,6 @@ function getVisiblePosts() {
     if (!state.activeAccountId) return [];
     return state.posts.filter((post) => post.accountId === state.activeAccountId);
   }
-
   return state.posts;
 }
 
@@ -651,9 +644,7 @@ function countPostsByAccount(accountId) {
 }
 
 function getAvatar(account) {
-  if (account && account.avatarDataUrl) {
-    return account.avatarDataUrl;
-  }
+  if (account?.avatarDataUrl) return account.avatarDataUrl;
 
   const initial = (account?.username || "U").slice(0, 1).toUpperCase();
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'><rect width='100%' height='100%' fill='%23262626'/><text x='50%' y='56%' dominant-baseline='middle' text-anchor='middle' fill='white' font-size='34' font-family='Arial'>${initial}</text></svg>`;
@@ -668,10 +659,7 @@ function createEmptyMessage() {
 }
 
 function formatDate(unixTime) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(unixTime);
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(unixTime);
 }
 
 function escapeHtml(input) {
@@ -689,5 +677,33 @@ function fileToDataUrl(file) {
     reader.onload = () => resolve(String(reader.result || ""));
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
+  });
+}
+
+async function fileToSizedSquareDataUrl(file, size) {
+  const source = await fileToDataUrl(file);
+  const image = await loadImage(source);
+
+  const shortest = Math.min(image.width, image.height);
+  const offsetX = (image.width - shortest) / 2;
+  const offsetY = (image.height - shortest) / 2;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const context = canvas.getContext("2d");
+  if (!context) return source;
+
+  context.drawImage(image, offsetX, offsetY, shortest, shortest, 0, 0, size, size);
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
   });
 }

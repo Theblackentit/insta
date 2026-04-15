@@ -61,7 +61,8 @@ button.ghost { background: transparent; border-color: var(--border); }
 .reels-overlay { position: fixed; inset: 0; background: #000; z-index: 50; display: grid; place-items: center; }
 .reel-stage { width: min(620px, 98vw); height: 94vh; border-radius: 16px; overflow: hidden; border: 1px solid var(--border); background: #090909; position: relative; }
 .reel-stage img { width: 100%; height: 100%; object-fit: cover; cursor: pointer; }
-.reel-meta { position: absolute; left: 0; right: 0; bottom: 0; padding: .85rem; background: linear-gradient(180deg, transparent, rgba(0,0,0,.9)); }
+.reel-meta { position: absolute; left: 0; right: 0; bottom: 0; padding: .85rem; background: linear-gradient(180deg, transparent, rgba(0,0,0,.9)); pointer-events: none; }
+.reel-meta .avatar { width: 32px; height: 32px; }
 .reel-next, .reel-close { position: fixed; border: 1px solid var(--border); background: rgba(24,24,24,.85); }
 .reel-next { bottom: 1rem; right: 1rem; width: 3rem; height: 3rem; border-radius: 999px; font-size: 1.2rem; }
 .reel-close { top: 1rem; left: 1rem; }
