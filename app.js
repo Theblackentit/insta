@@ -17,6 +17,7 @@ const state = {
   selectedPostId: null,
   selectedPostMediaIndex: 0,
   currentReelIndex: 0,
+  currentReelMediaIndex: 0,
   searchQuery: "",
 };
 
@@ -139,6 +140,14 @@ async function init() {
       event.preventDefault();
       nextReel();
     }
+    if (state.viewMode === "reels" && event.key === "ArrowLeft") {
+      event.preventDefault();
+      shiftReelMedia(-1);
+    }
+    if (state.viewMode === "reels" && event.key === "ArrowRight") {
+      event.preventDefault();
+      shiftReelMedia(1);
+    }
   });
 
   closeModalButton.addEventListener("click", closeModal);
@@ -219,7 +228,10 @@ function ensureActiveAccount() {
 
 function setViewMode(mode) {
   state.viewMode = mode;
-  if (mode === "reels") state.currentReelIndex = 0;
+  if (mode === "reels") {
+    state.currentReelIndex = 0;
+    state.currentReelMediaIndex = 0;
+  }
   if (mode === "profile" && !state.profileViewingId) state.profileViewingId = state.activeAccountId;
   persist();
   renderAll();
@@ -393,6 +405,7 @@ function clearData() {
   state.viewMode = "feed";
   state.searchQuery = "";
   state.currentReelIndex = 0;
+  state.currentReelMediaIndex = 0;
   state.selectedPostId = null;
   state.selectedPostMediaIndex = 0;
   clearPersistedState().catch((error) => console.error("Unable to clear app data", error));
@@ -740,21 +753,44 @@ function renderReels() {
 
   if (state.currentReelIndex >= state.posts.length) state.currentReelIndex = 0;
   const post = state.posts[state.currentReelIndex];
-  const firstMedia = getPostMediaItems(post)[0];
-  if (!firstMedia) return;
+  const mediaItems = getPostMediaItems(post);
+  if (!mediaItems.length) return;
+  if (state.currentReelMediaIndex >= mediaItems.length) state.currentReelMediaIndex = 0;
+  if (state.currentReelMediaIndex < 0) state.currentReelMediaIndex = mediaItems.length - 1;
+  const currentMedia = mediaItems[state.currentReelMediaIndex];
   const account = state.accounts.find((item) => item.id === post.accountId);
 
-  const reelMedia = firstMedia.type === "video"
-    ? `<video src="${firstMedia.dataUrl}" id="reel-media" controls autoplay muted loop playsinline></video>`
-    : `<img src="${firstMedia.dataUrl}" alt="Reel image" id="reel-media" />`;
-  reelStage.innerHTML = `${reelMedia}<div class="reel-meta"><div class="user-line"><img class="avatar" src="${getAvatar(account)}" alt="avatar" /><strong>@${escapeHtml(account?.username || "deleted")}</strong></div><p>${escapeHtml(post.caption || "")}</p></div>`;
+  const reelMedia = currentMedia.type === "video"
+    ? `<video src="${currentMedia.dataUrl}" id="reel-media" controls autoplay muted loop playsinline></video>`
+    : `<img src="${currentMedia.dataUrl}" alt="Reel image" id="reel-media" />`;
+  const slideControls = mediaItems.length > 1
+    ? `<button id="prev-reel-media" class="reel-slide-nav left" type="button" aria-label="Previous slide">‹</button>
+       <button id="next-reel-media" class="reel-slide-nav right" type="button" aria-label="Next slide">›</button>
+       <span class="reel-slide-count">${state.currentReelMediaIndex + 1}/${mediaItems.length}</span>`
+    : "";
+  reelStage.innerHTML = `${reelMedia}${slideControls}<div class="reel-meta"><div class="user-line"><img class="avatar" src="${getAvatar(account)}" alt="avatar" /><strong>@${escapeHtml(account?.username || "deleted")}</strong></div><p>${escapeHtml(post.caption || "")}</p></div>`;
   const reelImage = document.getElementById("reel-media");
-  if (reelImage && firstMedia.type !== "video") reelImage.addEventListener("click", () => openPost(post.id));
+  if (reelImage && currentMedia.type !== "video") reelImage.addEventListener("click", () => openPost(post.id));
+  const prevSlideButton = document.getElementById("prev-reel-media");
+  const nextSlideButton = document.getElementById("next-reel-media");
+  if (prevSlideButton) prevSlideButton.addEventListener("click", () => shiftReelMedia(-1));
+  if (nextSlideButton) nextSlideButton.addEventListener("click", () => shiftReelMedia(1));
 }
 
 function nextReel() {
   if (!state.posts.length) return;
   state.currentReelIndex = (state.currentReelIndex + 1) % state.posts.length;
+  state.currentReelMediaIndex = 0;
+  renderReels();
+}
+
+function shiftReelMedia(delta) {
+  if (!state.posts.length) return;
+  const post = state.posts[state.currentReelIndex];
+  if (!post) return;
+  const mediaItems = getPostMediaItems(post);
+  if (mediaItems.length < 2) return;
+  state.currentReelMediaIndex = (state.currentReelMediaIndex + delta + mediaItems.length) % mediaItems.length;
   renderReels();
 }
 

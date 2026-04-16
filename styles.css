@@ -55,6 +55,10 @@ button.ghost{background:transparent;border-color:var(--border)}
 .reel-stage{width:min(620px,98vw);height:94vh;border-radius:16px;overflow:hidden;border:1px solid var(--border);background:#090909;position:relative}
 .reel-stage img,.reel-stage video{width:100%;height:100%;object-fit:cover;cursor:pointer}
 .reel-meta{position:absolute;left:0;right:0;bottom:0;padding:.85rem;background:linear-gradient(180deg,transparent,rgba(0,0,0,.9));pointer-events:none}
+.reel-slide-nav{position:absolute;top:50%;transform:translateY(-50%);width:2.2rem;height:2.2rem;border-radius:999px;background:rgba(0,0,0,.45);border:1px solid #444;z-index:3}
+.reel-slide-nav.left{left:.6rem}
+.reel-slide-nav.right{right:.6rem}
+.reel-slide-count{position:absolute;top:.7rem;right:.7rem;z-index:3;background:rgba(0,0,0,.5);border:1px solid #333;border-radius:999px;padding:.15rem .5rem;font-size:.8rem}
 .reel-next,.reel-close{position:fixed;border:1px solid var(--border);background:rgba(24,24,24,.85)}
 .reel-next{bottom:1rem;right:1rem;width:3rem;height:3rem;border-radius:999px;font-size:1.2rem}
 .reel-close{top:1rem;left:1rem}
