@@ -25,6 +25,14 @@
             <input id="username" name="username" type="text" maxlength="24" placeholder="username" required />
             <label for="avatar" class="muted small">Profile picture (click to crop)</label>
             <input id="avatar" name="avatar" type="file" accept="image/*" />
+            <input id="identity" name="identity" type="text" maxlength="80" placeholder="Identity (e.g. travel photographer)" />
+            <select id="behavior" name="behavior">
+              <option value="friendly">Friendly</option>
+              <option value="professional">Professional</option>
+              <option value="playful">Playful</option>
+              <option value="sarcastic">Sarcastic</option>
+              <option value="supportive">Supportive</option>
+            </select>
             <button type="submit">Add account</button>
           </form>
         </section>
@@ -57,15 +65,36 @@
 
         <section id="dm-panel" class="dm-card hidden">
           <h2>Fake DMs</h2>
-          <form id="dm-form" class="stack">
-            <div class="dm-row">
-              <select id="dm-from" name="from" required></select>
-              <select id="dm-to" name="to" required></select>
-            </div>
-            <input id="dm-text" name="text" type="text" maxlength="200" placeholder="Type a message..." required />
-            <button type="submit">Send DM</button>
-          </form>
-          <div id="dm-thread" class="dm-thread"></div>
+          <div class="stack">
+            <select id="dm-mode">
+              <option value="manual">Direct message mode</option>
+              <option value="agent">AI agent chat mode</option>
+            </select>
+          </div>
+
+          <div id="dm-manual-section">
+            <form id="dm-form" class="stack">
+              <div class="dm-row">
+                <select id="dm-from" name="from" required></select>
+                <select id="dm-to" name="to" required></select>
+              </div>
+              <input id="dm-text" name="text" type="text" maxlength="200" placeholder="Type a message..." required />
+              <button type="submit">Send DM</button>
+            </form>
+            <div id="dm-thread" class="dm-thread"></div>
+          </div>
+
+          <div id="dm-agent-section" class="hidden">
+            <form id="ai-dm-form" class="stack">
+              <div class="dm-row">
+                <select id="ai-user" name="user" required></select>
+                <select id="ai-agent" name="agent" required></select>
+              </div>
+              <input id="ai-text" name="text" type="text" maxlength="200" placeholder="Message the AI persona..." required />
+              <button type="submit">Send to AI</button>
+            </form>
+            <div id="ai-thread" class="dm-thread"></div>
+          </div>
         </section>
 
         <section id="profile-header" class="profile-header hidden"></section>

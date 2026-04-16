@@ -42,11 +42,18 @@ const accountForm = document.getElementById("account-form");
 const postForm = document.getElementById("post-form");
 const commentForm = document.getElementById("comment-form");
 const dmForm = document.getElementById("dm-form");
+const aiDmForm = document.getElementById("ai-dm-form");
 const searchInput = document.getElementById("search-input");
 const searchResults = document.getElementById("search-results");
 const dmFrom = document.getElementById("dm-from");
 const dmTo = document.getElementById("dm-to");
 const dmThread = document.getElementById("dm-thread");
+const dmMode = document.getElementById("dm-mode");
+const dmManualSection = document.getElementById("dm-manual-section");
+const dmAgentSection = document.getElementById("dm-agent-section");
+const aiUser = document.getElementById("ai-user");
+const aiAgent = document.getElementById("ai-agent");
+const aiThread = document.getElementById("ai-thread");
 const dmPanel = document.getElementById("dm-panel");
 const composeCard = document.getElementById("compose-card");
 const accountList = document.getElementById("account-list");
@@ -106,12 +113,16 @@ async function init() {
   postForm.addEventListener("submit", handleCreatePost);
   commentForm.addEventListener("submit", handleAddComment);
   dmForm.addEventListener("submit", handleSendDm);
+  aiDmForm.addEventListener("submit", handleSendAiDm);
 
   avatarInput.addEventListener("change", () => startCrop("avatar"));
   postInput.addEventListener("change", handlePostFileChange);
 
   dmFrom.addEventListener("change", renderDmThread);
   dmTo.addEventListener("change", renderDmThread);
+  aiUser.addEventListener("change", renderAiThread);
+  aiAgent.addEventListener("change", renderAiThread);
+  dmMode.addEventListener("change", renderDmMode);
 
   searchInput.addEventListener("input", () => {
     state.searchQuery = searchInput.value.trim().toLowerCase();
@@ -249,12 +260,16 @@ async function handleCreateAccount(event) {
   event.preventDefault();
   const data = new FormData(accountForm);
   const username = String(data.get("username") || "").trim().toLowerCase();
+  const identity = String(data.get("identity") || "").trim();
+  const behavior = String(data.get("behavior") || "friendly").trim().toLowerCase();
   if (!username) return;
   if (state.accounts.some((item) => item.username === username)) return alert("That username already exists.");
 
   state.accounts.unshift({
     id: crypto.randomUUID(),
     username,
+    identity: identity || `${username} account`,
+    behavior: behavior || "friendly",
     avatarDataUrl: cropState.target === "avatar" ? cropState.tempResult : null,
     createdAt: Date.now(),
   });
@@ -340,6 +355,25 @@ function handleSendDm(event) {
   textInput.value = "";
   persist();
   renderDmThread();
+}
+
+function handleSendAiDm(event) {
+  event.preventDefault();
+  const fromId = aiUser.value;
+  const agentId = aiAgent.value;
+  const textInput = document.getElementById("ai-text");
+  const text = textInput.value.trim();
+  if (!fromId || !agentId || fromId === agentId || !text) return;
+
+  state.dms.push({ id: crypto.randomUUID(), fromId, toId: agentId, text, createdAt: Date.now(), mode: "agent-user" });
+
+  const agentAccount = state.accounts.find((account) => account.id === agentId);
+  const response = generateAgentReply(agentAccount, text);
+  state.dms.push({ id: crypto.randomUUID(), fromId: agentId, toId: fromId, text: response, createdAt: Date.now(), mode: "agent-bot" });
+
+  textInput.value = "";
+  persist();
+  renderAiThread();
 }
 
 
@@ -480,7 +514,9 @@ function renderAll() {
   renderAccounts();
   renderSearchResults();
   renderDmSelectors();
+  renderDmMode();
   renderDmThread();
+  renderAiThread();
   renderProfileHeader();
   renderFeed();
   renderReels();
@@ -581,11 +617,17 @@ function renderDmSelectors() {
   const options = state.accounts.map((account) => `<option value="${account.id}">@${escapeHtml(account.username)}</option>`).join("");
   const fromCurrent = dmFrom.value;
   const toCurrent = dmTo.value;
+  const aiUserCurrent = aiUser.value;
+  const aiAgentCurrent = aiAgent.value;
   dmFrom.innerHTML = `<option value="">From</option>${options}`;
   dmTo.innerHTML = `<option value="">To</option>${options}`;
+  aiUser.innerHTML = `<option value="">You</option>${options}`;
+  aiAgent.innerHTML = `<option value="">AI agent</option>${options}`;
   if (state.accounts.length >= 2) {
     dmFrom.value = hasAccount(fromCurrent) ? fromCurrent : state.accounts[0].id;
     dmTo.value = hasAccount(toCurrent) ? toCurrent : state.accounts[1].id;
+    aiUser.value = hasAccount(aiUserCurrent) ? aiUserCurrent : state.accounts[0].id;
+    aiAgent.value = hasAccount(aiAgentCurrent) ? aiAgentCurrent : state.accounts[1].id;
   }
 }
 
@@ -609,6 +651,37 @@ function renderDmThread() {
     node.className = `dm-msg ${dm.fromId === fromId ? "self" : "other"}`;
     node.innerHTML = `<strong>${sender ? `@${escapeHtml(sender.username)}` : "@deleted"}</strong><br>${escapeHtml(dm.text)}`;
     dmThread.append(node);
+  }
+}
+
+function renderDmMode() {
+  const mode = dmMode.value || "manual";
+  dmManualSection.classList.toggle("hidden", mode !== "manual");
+  dmAgentSection.classList.toggle("hidden", mode !== "agent");
+}
+
+function renderAiThread() {
+  aiThread.innerHTML = "";
+  const userId = aiUser.value;
+  const agentId = aiAgent.value;
+  if (!userId || !agentId || userId === agentId) {
+    aiThread.innerHTML = '<p class="muted small">Select a user and AI agent account.</p>';
+    return;
+  }
+
+  const messages = state.dms.filter((dm) => (dm.fromId === userId && dm.toId === agentId) || (dm.fromId === agentId && dm.toId === userId));
+  if (!messages.length) {
+    aiThread.innerHTML = '<p class="muted small">No AI chat yet. Send a message to start.</p>';
+    return;
+  }
+
+  for (const dm of messages) {
+    const sender = state.accounts.find((acc) => acc.id === dm.fromId);
+    const isAgent = dm.fromId === agentId;
+    const node = document.createElement("div");
+    node.className = `dm-msg ${isAgent ? "other" : "self"}`;
+    node.innerHTML = `<strong>${sender ? `@${escapeHtml(sender.username)}` : "@deleted"} ${isAgent ? "🤖" : ""}</strong><br>${escapeHtml(dm.text)}`;
+    aiThread.append(node);
   }
 }
 
@@ -969,6 +1042,35 @@ function createEmptyMessage() {
   p.className = "empty";
   p.textContent = "No posts match this view yet.";
   return p;
+}
+
+function generateAgentReply(agentAccount, incomingText) {
+  const identity = agentAccount?.identity || `${agentAccount?.username || "This account"} persona`;
+  const behavior = (agentAccount?.behavior || "friendly").toLowerCase();
+  const text = incomingText.toLowerCase();
+
+  const behaviorStyle = {
+    friendly: "Hey! ",
+    professional: "Thank you for reaching out. ",
+    playful: "Haha, love this. ",
+    sarcastic: "Sure, because that's exactly how it works. ",
+    supportive: "You've got this. ",
+  };
+
+  if (text.includes("hello") || text.includes("hi")) {
+    return `${behaviorStyle[behavior] || ""}I'm ${identity}. Nice to chat with you.`;
+  }
+  if (text.includes("help")) {
+    return `${behaviorStyle[behavior] || ""}As ${identity}, I'd suggest breaking this into small steps and tackling one at a time.`;
+  }
+  if (text.includes("photo") || text.includes("post")) {
+    return `${behaviorStyle[behavior] || ""}As ${identity}, I'd say post what feels authentic and keep your caption simple.`;
+  }
+  if (text.includes("?")) {
+    return `${behaviorStyle[behavior] || ""}From my ${behavior} perspective (${identity}), I'd say yes—if it aligns with your goals.`;
+  }
+
+  return `${behaviorStyle[behavior] || ""}${identity} heard you: "${incomingText}". Want a short or detailed reply?`;
 }
 
 function formatDate(unixTime) {
