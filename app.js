@@ -373,10 +373,11 @@ async function handleSendAiDm(event) {
   state.dms.push({ id: crypto.randomUUID(), fromId, toId: agentId, text, createdAt: Date.now(), mode: "agent-user" });
 
   const agentAccount = state.accounts.find((account) => account.id === agentId);
+  const fromUser = state.accounts.find((account) => account.id === fromId);
   if (text.toLowerCase().startsWith("/remember ")) {
     const memoryText = text.slice(10).trim();
     if (memoryText) {
-      rememberAgentFacts(fromId, agentId, memoryText);
+      LocalAgent.remember(state.agentMemory, fromId, agentId, memoryText);
       state.dms.push({ id: crypto.randomUUID(), fromId: agentId, toId: fromId, text: `Noted. I'll remember: ${memoryText}`, createdAt: Date.now(), mode: "agent-bot" });
       textInput.value = "";
       persist();
@@ -384,8 +385,15 @@ async function handleSendAiDm(event) {
       return;
     }
   }
-  rememberAgentFacts(fromId, agentId, text);
-  const response = generateLocalAgentReply(agentAccount, text, fromId, agentId);
+  const history = state.dms.filter((dm) => (dm.fromId === fromId && dm.toId === agentId) || (dm.fromId === agentId && dm.toId === fromId)).slice(-20);
+  const response = LocalAgent.generateReply({
+    account: agentAccount || { id: agentId, username: "agent", identity: "", bio: "" },
+    fromUser: fromUser || { id: fromId, username: "user" },
+    input: text,
+    history,
+    memoryStore: state.agentMemory,
+  });
+  LocalAgent.remember(state.agentMemory, fromId, agentId, text, response);
   state.dms.push({ id: crypto.randomUUID(), fromId: agentId, toId: fromId, text: response, createdAt: Date.now(), mode: "agent-bot" });
 
   textInput.value = "";
@@ -690,7 +698,7 @@ function renderAiThread() {
   const messages = state.dms.filter((dm) => (dm.fromId === userId && dm.toId === agentId) || (dm.fromId === agentId && dm.toId === userId));
   if (!messages.length) {
     const agentAccount = state.accounts.find((acc) => acc.id === agentId);
-    aiThread.innerHTML = `<p class="muted small">${escapeHtml(getAgentOpener(agentAccount))}</p>`;
+    aiThread.innerHTML = `<p class="muted small">${escapeHtml(LocalAgent.getOpener(agentAccount))}</p>`;
     return;
   }
 
@@ -1062,134 +1070,6 @@ function createEmptyMessage() {
   p.className = "empty";
   p.textContent = "No posts match this view yet.";
   return p;
-}
-
-function getAgentOpener(agentAccount) {
-  const identity = agentAccount?.identity || `@${agentAccount?.username || "agent"}`;
-  const bio = agentAccount?.bio ? `Bio: ${agentAccount.bio}` : "Tell me your scenario and I'll stay in character.";
-  return `${identity} is ready to chat. ${bio} (Tip: use "/remember <fact>" to pin important memory.)`;
-}
-
-function rememberAgentFacts(fromId, agentId, incomingText) {
-  const memoryKey = `${fromId}:${agentId}`;
-  if (!state.agentMemory[memoryKey]) state.agentMemory[memoryKey] = { facts: [], topics: [], preferences: {} };
-  const facts = extractFactsFromText(incomingText);
-  for (const fact of facts) {
-    if (!state.agentMemory[memoryKey].facts.includes(fact)) {
-      state.agentMemory[memoryKey].facts.push(fact);
-    }
-  }
-  state.agentMemory[memoryKey].facts = state.agentMemory[memoryKey].facts.slice(-20);
-  rememberConversationTopics(fromId, agentId, incomingText);
-}
-
-function extractFactsFromText(text) {
-  const lowered = text.toLowerCase();
-  const facts = [];
-  const patterns = [
-    /my name is ([a-z\s'-]{2,30})/i,
-    /i am ([a-z\s'-]{2,40})/i,
-    /i like ([a-z0-9\s,'-]{2,50})/i,
-    /i love ([a-z0-9\s,'-]{2,50})/i,
-    /i live in ([a-z\s'-]{2,40})/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = lowered.match(pattern);
-    if (match?.[1]) facts.push(match[0]);
-  }
-  return facts;
-}
-
-function rememberConversationTopics(fromId, agentId, text) {
-  const memoryKey = `${fromId}:${agentId}`;
-  if (!state.agentMemory[memoryKey]) state.agentMemory[memoryKey] = { facts: [], topics: [], preferences: {} };
-  const topics = extractTopics(text);
-  for (const topic of topics) {
-    if (!state.agentMemory[memoryKey].topics.includes(topic)) state.agentMemory[memoryKey].topics.push(topic);
-  }
-  state.agentMemory[memoryKey].topics = state.agentMemory[memoryKey].topics.slice(-25);
-}
-
-function extractTopics(text) {
-  const stopwords = new Set(["the", "and", "that", "this", "with", "about", "your", "have", "what", "would", "could", "should", "just", "from", "they", "them", "there", "their", "wanna", "want", "talk"]);
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((word) => word.length > 2 && !stopwords.has(word))
-    .slice(-6);
-}
-
-function generateLocalAgentReply(agentAccount, incomingText, fromId, agentId) {
-  const username = agentAccount?.username || "friend";
-  const bio = (agentAccount?.bio || "").toLowerCase();
-  const behavior = (agentAccount?.behavior || "friendly").toLowerCase();
-  const text = incomingText.toLowerCase().trim();
-  const history = state.dms
-    .filter((dm) => (dm.fromId === fromId && dm.toId === agentId) || (dm.fromId === agentId && dm.toId === fromId))
-    .slice(-20);
-  const memoryKey = `${fromId}:${agentId}`;
-  const memory = state.agentMemory[memoryKey] || { facts: [], topics: [], preferences: {} };
-  const rememberedFacts = memory.facts || [];
-  const rememberedTopics = memory.topics || [];
-  const recalledFact = rememberedFacts.length ? rememberedFacts[(history.length + text.length) % rememberedFacts.length] : "";
-  const recentTopic = rememberedTopics.length ? rememberedTopics[rememberedTopics.length - 1] : "";
-
-  const behaviorStyle = {
-    friendly: "",
-    professional: "Sure. ",
-    playful: "Haha, ",
-    sarcastic: "Alright, ",
-    supportive: "I got you. ",
-  };
-
-  const prefix = behaviorStyle[behavior] || "";
-  if (text.includes("hello") || text.includes("hi") || text.includes("hey")) {
-    return `${prefix}hey ${state.accounts.find((a) => a.id === fromId)?.username || "there"}`;
-  }
-  if (text.includes("wanna talk about") || text.includes("want to talk about")) {
-    const topicWords = extractTopics(text).slice(-3).join(" ");
-    return `${prefix}sure${topicWords ? `, let's talk about ${topicWords}` : ""}`;
-  }
-  if (text.includes("favorite character")) {
-    const topic = text.includes("dragon ball") ? "dragon ball" : recentTopic;
-    return `${prefix}${pickFavoriteForTopic(topic, username, bio)}`;
-  }
-  if (text.includes("favorite")) {
-    return `${prefix}${pickFavoriteForTopic(recentTopic, username, bio)}`;
-  }
-  if (/(yes or no|should i|do you think)/.test(text)) {
-    return `${prefix}yeah, I'd say go for it`;
-  }
-  if (text.includes("?")) {
-    const topic = recentTopic || extractTopics(text).slice(-1)[0] || "that";
-    return `${prefix}good question — I think ${topic} comes down to preference, but I like the classic approach`;
-  }
-
-  if (text.includes("sad") || text.includes("stressed") || text.includes("anxious")) {
-    return `${prefix}I hear you. want to vent a bit or want advice?`;
-  }
-
-  if (recentTopic) return `${prefix}nice, still on ${recentTopic}?`;
-  if (recalledFact) return `${prefix}got it. you mentioned ${recalledFact} earlier`;
-  return `${prefix}tell me more`;
-}
-
-function pickFavoriteForTopic(topic, username, bio) {
-  const topicText = `${topic || ""} ${bio}`.toLowerCase();
-  if (topicText.includes("dragon") || topicText.includes("ball")) {
-    return ["Frieza", "Vegeta", "Piccolo", "Future Trunks"][simpleHash(username + topicText) % 4];
-  }
-  if (topicText.includes("naruto")) return ["Kakashi", "Itachi", "Shikamaru"][simpleHash(username + topicText) % 3];
-  if (topicText.includes("one piece")) return ["Zoro", "Robin", "Law"][simpleHash(username + topicText) % 3];
-  return ["probably the main one", "honestly whichever has the best arc", "hard pick, but I like the villain side"][simpleHash(username + topicText) % 3];
-}
-
-function simpleHash(input) {
-  let hash = 0;
-  for (let index = 0; index < input.length; index += 1) hash = ((hash << 5) - hash) + input.charCodeAt(index);
-  return Math.abs(hash);
 }
 
 function formatDate(unixTime) {

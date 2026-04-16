@@ -1,0 +1,18 @@
+window.AI_CORPUS = [
+  "hey, good to hear from you",
+  "yeah, I am down to talk about that",
+  "sure, what angle do you want to explore first",
+  "interesting point, I had a different take",
+  "that's fair, I can see why you think that",
+  "if we break it down step by step it gets clearer",
+  "I remember that detail from earlier",
+  "good question, I would compare both sides first",
+  "for dragon ball I like Frieza because he is iconic",
+  "Vegeta has one of the best growth arcs",
+  "Piccolo is underrated and consistent",
+  "tell me more so I can answer better",
+  "I can keep this short or go deep",
+  "that sounds stressful, do you want practical advice or just to vent",
+  "I get what you mean, let's keep going",
+  "let's stay focused on the topic and build from there",
+];
