@@ -19,6 +19,10 @@ const state = {
   currentReelIndex: 0,
   currentReelMediaIndex: 0,
   searchQuery: "",
+  aiConfig: {
+    endpoint: "",
+    model: "gpt-4.1-mini",
+  },
 };
 
 const cropState = {
@@ -54,6 +58,9 @@ const dmAgentSection = document.getElementById("dm-agent-section");
 const aiUser = document.getElementById("ai-user");
 const aiAgent = document.getElementById("ai-agent");
 const aiThread = document.getElementById("ai-thread");
+const aiEndpointInput = document.getElementById("ai-endpoint");
+const aiModelInput = document.getElementById("ai-model");
+const aiApiKeyInput = document.getElementById("ai-api-key");
 const dmPanel = document.getElementById("dm-panel");
 const composeCard = document.getElementById("compose-card");
 const accountList = document.getElementById("account-list");
@@ -107,6 +114,8 @@ async function init() {
   await hydrate();
   ensureActiveAccount();
   searchInput.value = state.searchQuery;
+  aiEndpointInput.value = state.aiConfig.endpoint;
+  aiModelInput.value = state.aiConfig.model;
   renderAll();
 
   accountForm.addEventListener("submit", handleCreateAccount);
@@ -123,6 +132,8 @@ async function init() {
   aiUser.addEventListener("change", renderAiThread);
   aiAgent.addEventListener("change", renderAiThread);
   dmMode.addEventListener("change", renderDmMode);
+  aiEndpointInput.addEventListener("input", updateAiConfig);
+  aiModelInput.addEventListener("input", updateAiConfig);
 
   searchInput.addEventListener("input", () => {
     state.searchQuery = searchInput.value.trim().toLowerCase();
@@ -214,6 +225,10 @@ async function hydrate() {
   state.viewMode = ["feed", "post", "explore", "profile", "reels", "dm"].includes(parsed.viewMode) ? parsed.viewMode : "feed";
   state.profileViewingId = parsed.profileViewingId || null;
   state.searchQuery = typeof parsed.searchQuery === "string" ? parsed.searchQuery : "";
+  state.aiConfig = {
+    endpoint: typeof parsed.aiConfig?.endpoint === "string" ? parsed.aiConfig.endpoint : "",
+    model: typeof parsed.aiConfig?.model === "string" ? parsed.aiConfig.model : "gpt-4.1-mini",
+  };
 }
 
 function persist() {
@@ -226,6 +241,7 @@ function persist() {
     viewMode: state.viewMode,
     profileViewingId: state.profileViewingId,
     searchQuery: state.searchQuery,
+    aiConfig: state.aiConfig,
   }).catch((error) => {
     console.error("Unable to save app state", error);
     alert("Unable to save app data on this device.");
@@ -357,7 +373,13 @@ function handleSendDm(event) {
   renderDmThread();
 }
 
-function handleSendAiDm(event) {
+function updateAiConfig() {
+  state.aiConfig.endpoint = aiEndpointInput.value.trim();
+  state.aiConfig.model = aiModelInput.value.trim() || "gpt-4.1-mini";
+  persist();
+}
+
+async function handleSendAiDm(event) {
   event.preventDefault();
   const fromId = aiUser.value;
   const agentId = aiAgent.value;
@@ -368,7 +390,7 @@ function handleSendAiDm(event) {
   state.dms.push({ id: crypto.randomUUID(), fromId, toId: agentId, text, createdAt: Date.now(), mode: "agent-user" });
 
   const agentAccount = state.accounts.find((account) => account.id === agentId);
-  const response = generateAgentReply(agentAccount, text);
+  const response = await generateAgentReply(agentAccount, text, fromId, agentId);
   state.dms.push({ id: crypto.randomUUID(), fromId: agentId, toId: fromId, text: response, createdAt: Date.now(), mode: "agent-bot" });
 
   textInput.value = "";
@@ -1044,7 +1066,50 @@ function createEmptyMessage() {
   return p;
 }
 
-function generateAgentReply(agentAccount, incomingText) {
+async function generateAgentReply(agentAccount, incomingText, fromId, agentId) {
+  const configuredEndpoint = state.aiConfig.endpoint.trim();
+  const configuredModel = state.aiConfig.model.trim() || "gpt-4.1-mini";
+  const apiKey = aiApiKeyInput.value.trim();
+
+  if (configuredEndpoint && apiKey) {
+    try {
+      const history = state.dms
+        .filter((dm) => (dm.fromId === fromId && dm.toId === agentId) || (dm.fromId === agentId && dm.toId === fromId))
+        .slice(-10)
+        .map((dm) => ({
+          role: dm.fromId === agentId ? "assistant" : "user",
+          content: dm.text,
+        }));
+      history.push({ role: "user", content: incomingText });
+
+      const systemPrompt = `You are roleplaying this Instagram account persona.\nIdentity: ${agentAccount?.identity || "generic creator"}\nBehavior pattern: ${agentAccount?.behavior || "friendly"}\nBe concise, natural, and in-character.`;
+      const response = await fetch(configuredEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: configuredModel,
+          messages: [{ role: "system", content: systemPrompt }, ...history],
+          temperature: 0.9,
+        }),
+      });
+
+      if (response.ok) {
+        const payload = await response.json();
+        const text = payload?.choices?.[0]?.message?.content?.trim();
+        if (text) return text;
+      }
+    } catch (error) {
+      console.error("Remote AI request failed, falling back to local persona reply.", error);
+    }
+  }
+
+  return generateFallbackReply(agentAccount, incomingText);
+}
+
+function generateFallbackReply(agentAccount, incomingText) {
   const identity = agentAccount?.identity || `${agentAccount?.username || "This account"} persona`;
   const behavior = (agentAccount?.behavior || "friendly").toLowerCase();
   const text = incomingText.toLowerCase();
