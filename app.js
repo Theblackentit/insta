@@ -1072,7 +1072,7 @@ function getAgentOpener(agentAccount) {
 
 function rememberAgentFacts(fromId, agentId, incomingText) {
   const memoryKey = `${fromId}:${agentId}`;
-  if (!state.agentMemory[memoryKey]) state.agentMemory[memoryKey] = { facts: [] };
+  if (!state.agentMemory[memoryKey]) state.agentMemory[memoryKey] = { facts: [], topics: [], preferences: {} };
   const facts = extractFactsFromText(incomingText);
   for (const fact of facts) {
     if (!state.agentMemory[memoryKey].facts.includes(fact)) {
@@ -1080,6 +1080,7 @@ function rememberAgentFacts(fromId, agentId, incomingText) {
     }
   }
   state.agentMemory[memoryKey].facts = state.agentMemory[memoryKey].facts.slice(-20);
+  rememberConversationTopics(fromId, agentId, incomingText);
 }
 
 function extractFactsFromText(text) {
@@ -1100,63 +1101,95 @@ function extractFactsFromText(text) {
   return facts;
 }
 
+function rememberConversationTopics(fromId, agentId, text) {
+  const memoryKey = `${fromId}:${agentId}`;
+  if (!state.agentMemory[memoryKey]) state.agentMemory[memoryKey] = { facts: [], topics: [], preferences: {} };
+  const topics = extractTopics(text);
+  for (const topic of topics) {
+    if (!state.agentMemory[memoryKey].topics.includes(topic)) state.agentMemory[memoryKey].topics.push(topic);
+  }
+  state.agentMemory[memoryKey].topics = state.agentMemory[memoryKey].topics.slice(-25);
+}
+
+function extractTopics(text) {
+  const stopwords = new Set(["the", "and", "that", "this", "with", "about", "your", "have", "what", "would", "could", "should", "just", "from", "they", "them", "there", "their", "wanna", "want", "talk"]);
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2 && !stopwords.has(word))
+    .slice(-6);
+}
+
 function generateLocalAgentReply(agentAccount, incomingText, fromId, agentId) {
-  const identity = agentAccount?.identity || `${agentAccount?.username || "This account"} persona`;
-  const bio = agentAccount?.bio || "";
+  const username = agentAccount?.username || "friend";
+  const bio = (agentAccount?.bio || "").toLowerCase();
   const behavior = (agentAccount?.behavior || "friendly").toLowerCase();
   const text = incomingText.toLowerCase().trim();
   const history = state.dms
     .filter((dm) => (dm.fromId === fromId && dm.toId === agentId) || (dm.fromId === agentId && dm.toId === fromId))
-    .slice(-6);
+    .slice(-20);
   const memoryKey = `${fromId}:${agentId}`;
-  const rememberedFacts = state.agentMemory[memoryKey]?.facts || [];
+  const memory = state.agentMemory[memoryKey] || { facts: [], topics: [], preferences: {} };
+  const rememberedFacts = memory.facts || [];
+  const rememberedTopics = memory.topics || [];
   const recalledFact = rememberedFacts.length ? rememberedFacts[(history.length + text.length) % rememberedFacts.length] : "";
+  const recentTopic = rememberedTopics.length ? rememberedTopics[rememberedTopics.length - 1] : "";
 
   const behaviorStyle = {
-    friendly: "Hey! ",
-    professional: "Thank you for reaching out. ",
-    playful: "Haha, love this. ",
-    sarcastic: "Sure, because that's exactly how it works. ",
-    supportive: "You've got this. ",
+    friendly: "",
+    professional: "Sure. ",
+    playful: "Haha, ",
+    sarcastic: "Alright, ",
+    supportive: "I got you. ",
   };
 
   const prefix = behaviorStyle[behavior] || "";
-  const roleplayMode = detectRoleplayMode(text, bio);
-  const modePrompt = {
-    romance: "Let's keep this emotional and character-driven.",
-    adventure: "Let's move the scene forward with action and choices.",
-    support: "Let's keep this gentle and encouraging.",
-    default: "Let's keep this natural and immersive.",
-  };
   if (text.includes("hello") || text.includes("hi") || text.includes("hey")) {
-    return `${prefix}I'm ${identity}. ${modePrompt[roleplayMode]}${recalledFact ? ` I remember you said ${recalledFact}.` : ""}`;
+    return `${prefix}hey ${state.accounts.find((a) => a.id === fromId)?.username || "there"}`;
   }
-  if (text.includes("help")) {
-    return `${prefix}As ${identity}, I'd break this into 3 steps: define goal, pick one action for today, then review after trying it.`;
+  if (text.includes("wanna talk about") || text.includes("want to talk about")) {
+    const topicWords = extractTopics(text).slice(-3).join(" ");
+    return `${prefix}sure${topicWords ? `, let's talk about ${topicWords}` : ""}`;
   }
-  if (text.includes("photo") || text.includes("post")) {
-    return `${prefix}As ${identity}, I'd post something authentic, keep the caption clear, and end with one simple question for engagement.`;
+  if (text.includes("favorite character")) {
+    const topic = text.includes("dragon ball") ? "dragon ball" : recentTopic;
+    return `${prefix}${pickFavoriteForTopic(topic, username, bio)}`;
   }
-  if (text.includes("sad") || text.includes("stressed") || text.includes("anxious")) {
-    return `${prefix}Sorry you're feeling that way. Want a quick practical plan or just someone to listen right now?`;
+  if (text.includes("favorite")) {
+    return `${prefix}${pickFavoriteForTopic(recentTopic, username, bio)}`;
+  }
+  if (/(yes or no|should i|do you think)/.test(text)) {
+    return `${prefix}yeah, I'd say go for it`;
   }
   if (text.includes("?")) {
-    return `${prefix}Good question. From my ${behavior} perspective (${identity}), I'd say go with the option that's most sustainable for you over time.`;
+    const topic = recentTopic || extractTopics(text).slice(-1)[0] || "that";
+    return `${prefix}good question — I think ${topic} comes down to preference, but I like the classic approach`;
   }
 
-  const continuityLine = history.length > 3
-    ? "We've been building momentum in this chat — keep going."
-    : "Tell me a little more and I'll tailor the next step.";
-  const bioFlavor = bio ? ` In my own words: ${bio.slice(0, 120)}.` : "";
-  return `${prefix}${identity} heard you: "${incomingText}". ${modePrompt[roleplayMode]} ${continuityLine}${recalledFact ? ` Also, I remember: ${recalledFact}.` : ""}${bioFlavor}`;
+  if (text.includes("sad") || text.includes("stressed") || text.includes("anxious")) {
+    return `${prefix}I hear you. want to vent a bit or want advice?`;
+  }
+
+  if (recentTopic) return `${prefix}nice, still on ${recentTopic}?`;
+  if (recalledFact) return `${prefix}got it. you mentioned ${recalledFact} earlier`;
+  return `${prefix}tell me more`;
 }
 
-function detectRoleplayMode(text, bio) {
-  const combined = `${text} ${bio}`.toLowerCase();
-  if (/(love|kiss|date|romance|crush|boyfriend|girlfriend)/.test(combined)) return "romance";
-  if (/(battle|fight|quest|mission|escape|adventure|dragon|sword)/.test(combined)) return "adventure";
-  if (/(sad|anxious|depressed|stress|overwhelmed|support)/.test(combined)) return "support";
-  return "default";
+function pickFavoriteForTopic(topic, username, bio) {
+  const topicText = `${topic || ""} ${bio}`.toLowerCase();
+  if (topicText.includes("dragon") || topicText.includes("ball")) {
+    return ["Frieza", "Vegeta", "Piccolo", "Future Trunks"][simpleHash(username + topicText) % 4];
+  }
+  if (topicText.includes("naruto")) return ["Kakashi", "Itachi", "Shikamaru"][simpleHash(username + topicText) % 3];
+  if (topicText.includes("one piece")) return ["Zoro", "Robin", "Law"][simpleHash(username + topicText) % 3];
+  return ["probably the main one", "honestly whichever has the best arc", "hard pick, but I like the villain side"][simpleHash(username + topicText) % 3];
+}
+
+function simpleHash(input) {
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) hash = ((hash << 5) - hash) + input.charCodeAt(index);
+  return Math.abs(hash);
 }
 
 function formatDate(unixTime) {
