@@ -264,6 +264,7 @@ async function handleCreateAccount(event) {
   const data = new FormData(accountForm);
   const username = String(data.get("username") || "").trim().toLowerCase();
   const identity = String(data.get("identity") || "").trim();
+  const bio = String(data.get("bio") || "").trim();
   const behavior = String(data.get("behavior") || "friendly").trim().toLowerCase();
   if (!username) return;
   if (state.accounts.some((item) => item.username === username)) return alert("That username already exists.");
@@ -272,6 +273,7 @@ async function handleCreateAccount(event) {
     id: crypto.randomUUID(),
     username,
     identity: identity || `${username} account`,
+    bio: bio || "",
     behavior: behavior || "friendly",
     avatarDataUrl: cropState.target === "avatar" ? cropState.tempResult : null,
     createdAt: Date.now(),
@@ -371,6 +373,17 @@ async function handleSendAiDm(event) {
   state.dms.push({ id: crypto.randomUUID(), fromId, toId: agentId, text, createdAt: Date.now(), mode: "agent-user" });
 
   const agentAccount = state.accounts.find((account) => account.id === agentId);
+  if (text.toLowerCase().startsWith("/remember ")) {
+    const memoryText = text.slice(10).trim();
+    if (memoryText) {
+      rememberAgentFacts(fromId, agentId, memoryText);
+      state.dms.push({ id: crypto.randomUUID(), fromId: agentId, toId: fromId, text: `Noted. I'll remember: ${memoryText}`, createdAt: Date.now(), mode: "agent-bot" });
+      textInput.value = "";
+      persist();
+      renderAiThread();
+      return;
+    }
+  }
   rememberAgentFacts(fromId, agentId, text);
   const response = generateLocalAgentReply(agentAccount, text, fromId, agentId);
   state.dms.push({ id: crypto.randomUUID(), fromId: agentId, toId: fromId, text: response, createdAt: Date.now(), mode: "agent-bot" });
@@ -676,7 +689,8 @@ function renderAiThread() {
 
   const messages = state.dms.filter((dm) => (dm.fromId === userId && dm.toId === agentId) || (dm.fromId === agentId && dm.toId === userId));
   if (!messages.length) {
-    aiThread.innerHTML = '<p class="muted small">No AI chat yet. Send a message to start.</p>';
+    const agentAccount = state.accounts.find((acc) => acc.id === agentId);
+    aiThread.innerHTML = `<p class="muted small">${escapeHtml(getAgentOpener(agentAccount))}</p>`;
     return;
   }
 
@@ -706,6 +720,7 @@ function renderProfileHeader() {
     <div class="profile-avatar-wrap"><img class="profile-avatar" src="${getAvatar(account)}" alt="avatar" /></div>
     <div>
       <h2>@${escapeHtml(account.username)}</h2>
+      ${account.bio ? `<p class="muted">${escapeHtml(account.bio)}</p>` : ""}
       <div class="profile-stats"><span><strong>${postsCount}</strong> posts</span><span><strong>${followers}</strong> followers</span><span><strong>${following}</strong> following</span></div>
       <button id="follow-btn" type="button">${isFollowingActive(account.id) ? "Following" : "Follow"}</button>
       <div class="follow-lists small"><div><strong>Followers:</strong> ${renderFollowNames(account.id, "followers") || '<span class="muted">none</span>'}</div><div><strong>Following:</strong> ${renderFollowNames(account.id, "following") || '<span class="muted">none</span>'}</div></div>
@@ -1049,6 +1064,12 @@ function createEmptyMessage() {
   return p;
 }
 
+function getAgentOpener(agentAccount) {
+  const identity = agentAccount?.identity || `@${agentAccount?.username || "agent"}`;
+  const bio = agentAccount?.bio ? `Bio: ${agentAccount.bio}` : "Tell me your scenario and I'll stay in character.";
+  return `${identity} is ready to chat. ${bio} (Tip: use "/remember <fact>" to pin important memory.)`;
+}
+
 function rememberAgentFacts(fromId, agentId, incomingText) {
   const memoryKey = `${fromId}:${agentId}`;
   if (!state.agentMemory[memoryKey]) state.agentMemory[memoryKey] = { facts: [] };
@@ -1081,6 +1102,7 @@ function extractFactsFromText(text) {
 
 function generateLocalAgentReply(agentAccount, incomingText, fromId, agentId) {
   const identity = agentAccount?.identity || `${agentAccount?.username || "This account"} persona`;
+  const bio = agentAccount?.bio || "";
   const behavior = (agentAccount?.behavior || "friendly").toLowerCase();
   const text = incomingText.toLowerCase().trim();
   const history = state.dms
@@ -1099,8 +1121,15 @@ function generateLocalAgentReply(agentAccount, incomingText, fromId, agentId) {
   };
 
   const prefix = behaviorStyle[behavior] || "";
+  const roleplayMode = detectRoleplayMode(text, bio);
+  const modePrompt = {
+    romance: "Let's keep this emotional and character-driven.",
+    adventure: "Let's move the scene forward with action and choices.",
+    support: "Let's keep this gentle and encouraging.",
+    default: "Let's keep this natural and immersive.",
+  };
   if (text.includes("hello") || text.includes("hi") || text.includes("hey")) {
-    return `${prefix}I'm ${identity}. Good to hear from you.${recalledFact ? ` I remember you said ${recalledFact}.` : ""}`;
+    return `${prefix}I'm ${identity}. ${modePrompt[roleplayMode]}${recalledFact ? ` I remember you said ${recalledFact}.` : ""}`;
   }
   if (text.includes("help")) {
     return `${prefix}As ${identity}, I'd break this into 3 steps: define goal, pick one action for today, then review after trying it.`;
@@ -1118,7 +1147,16 @@ function generateLocalAgentReply(agentAccount, incomingText, fromId, agentId) {
   const continuityLine = history.length > 3
     ? "We've been building momentum in this chat — keep going."
     : "Tell me a little more and I'll tailor the next step.";
-  return `${prefix}${identity} heard you: "${incomingText}". ${continuityLine}${recalledFact ? ` Also, I remember: ${recalledFact}.` : ""}`;
+  const bioFlavor = bio ? ` In my own words: ${bio.slice(0, 120)}.` : "";
+  return `${prefix}${identity} heard you: "${incomingText}". ${modePrompt[roleplayMode]} ${continuityLine}${recalledFact ? ` Also, I remember: ${recalledFact}.` : ""}${bioFlavor}`;
+}
+
+function detectRoleplayMode(text, bio) {
+  const combined = `${text} ${bio}`.toLowerCase();
+  if (/(love|kiss|date|romance|crush|boyfriend|girlfriend)/.test(combined)) return "romance";
+  if (/(battle|fight|quest|mission|escape|adventure|dragon|sword)/.test(combined)) return "adventure";
+  if (/(sad|anxious|depressed|stress|overwhelmed|support)/.test(combined)) return "support";
+  return "default";
 }
 
 function formatDate(unixTime) {
