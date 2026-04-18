@@ -80,8 +80,44 @@
   }
 
   function ensureMemory(store, key) {
-    if (!store[key]) store[key] = { facts: [], topics: [], transcript: [] };
+    if (!store[key]) store[key] = { facts: [], topics: [], transcript: [], summaries: { 1: [], 2: [] } };
+    if (!store[key].summaries) store[key].summaries = { 1: [], 2: [] };
+    if (!Array.isArray(store[key].summaries[1])) store[key].summaries[1] = [];
+    if (!Array.isArray(store[key].summaries[2])) store[key].summaries[2] = [];
     return store[key];
+  }
+
+  function splitSentences(text) {
+    return String(text || "")
+      .split(/(?<=[.!?])\s+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  function summarizeExtractive(text, maxSentences = 4) {
+    const sentences = splitSentences(text);
+    if (sentences.length <= maxSentences) return sentences.join(" ");
+    const allWords = tokenize(text).filter((word) => word.length > 2 && !STOPWORDS.has(word));
+    const freq = {};
+    for (const word of allWords) freq[word] = (freq[word] || 0) + 1;
+
+    const ranked = sentences.map((sentence, index) => {
+      const score = tokenize(sentence).reduce((sum, word) => sum + (freq[word] || 0), 0);
+      return { sentence, index, score };
+    }).sort((a, b) => b.score - a.score).slice(0, maxSentences).sort((a, b) => a.index - b.index);
+
+    return ranked.map((item) => item.sentence).join(" ");
+  }
+
+  function refreshHierarchicalSummaries(node) {
+    if (!node.transcript.length) return;
+    const turnText = node.transcript.join(" ");
+    const level1 = summarizeExtractive(turnText, 6);
+    node.summaries[1].push(level1);
+    node.summaries[1] = node.summaries[1].slice(-8);
+    const level1Text = node.summaries[1].join(" ");
+    const level2 = summarizeExtractive(level1Text, 4);
+    node.summaries[2] = [level2];
   }
 
   function remember(store, fromId, agentId, userText, botText = "") {
@@ -96,6 +132,7 @@
     if (userText) node.transcript.push(`user: ${userText}`);
     if (botText) node.transcript.push(`bot: ${botText}`);
     node.transcript = node.transcript.slice(-80);
+    if (node.transcript.length % 12 === 0) refreshHierarchicalSummaries(node);
   }
 
   function generateReply({ account, fromUser, input, history, memoryStore }) {
@@ -105,10 +142,14 @@
     const seedWords = extractTopics(lower);
     const profileText = `${account.identity || ""} ${account.bio || ""}`;
     const historyText = (history || []).map((m) => m.text || "").join(". ");
+    const summaryText = [
+      ...(memory.summaries?.[2] || []),
+      ...(memory.summaries?.[1] || []),
+    ].join(" ");
     const corpora = []
       .concat(global.AI_CORPUS || [])
       .concat(memory.transcript || [])
-      .concat([profileText, historyText, input]);
+      .concat([profileText, historyText, summaryText, input]);
 
     if (/^(hey|hi|hello)\b/.test(lower)) {
       return `Hey ${fromUser.username}, what's up?`;
