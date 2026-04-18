@@ -1,6 +1,10 @@
 const STORAGE_KEY = "offline-insta-v7";
+const DB_NAME = "offline-insta-db-v1";
+const DB_STORE = "app_state";
+const DB_STATE_KEY = "primary";
 const AVATAR_SIZE = 512;
 const POST_SIZE = 1080;
+const MAX_IMAGE_UPLOAD_DIMENSION = 2048;
 
 const state = {
   accounts: [],
@@ -11,8 +15,11 @@ const state = {
   viewMode: "feed",
   profileViewingId: null,
   selectedPostId: null,
+  selectedPostMediaIndex: 0,
   currentReelIndex: 0,
+  currentReelMediaIndex: 0,
   searchQuery: "",
+  agentMemory: {},
 };
 
 const cropState = {
@@ -25,6 +32,8 @@ const cropState = {
   baseScale: 1,
   outputSize: AVATAR_SIZE,
   tempResult: null,
+  tempMediaType: "image",
+  tempPostMediaItems: [],
   dragging: false,
   dragStartX: 0,
   dragStartY: 0,
@@ -34,11 +43,18 @@ const accountForm = document.getElementById("account-form");
 const postForm = document.getElementById("post-form");
 const commentForm = document.getElementById("comment-form");
 const dmForm = document.getElementById("dm-form");
+const aiDmForm = document.getElementById("ai-dm-form");
 const searchInput = document.getElementById("search-input");
 const searchResults = document.getElementById("search-results");
 const dmFrom = document.getElementById("dm-from");
 const dmTo = document.getElementById("dm-to");
 const dmThread = document.getElementById("dm-thread");
+const dmMode = document.getElementById("dm-mode");
+const dmManualSection = document.getElementById("dm-manual-section");
+const dmAgentSection = document.getElementById("dm-agent-section");
+const aiUser = document.getElementById("ai-user");
+const aiAgent = document.getElementById("ai-agent");
+const aiThread = document.getElementById("ai-thread");
 const dmPanel = document.getElementById("dm-panel");
 const composeCard = document.getElementById("compose-card");
 const accountList = document.getElementById("account-list");
@@ -50,6 +66,7 @@ const clearButton = document.getElementById("clear-data");
 const postTemplate = document.getElementById("post-template");
 
 const viewFeedButton = document.getElementById("view-feed");
+const viewPostButton = document.getElementById("view-post");
 const viewExploreButton = document.getElementById("view-explore");
 const viewProfileButton = document.getElementById("view-profile");
 const viewReelsButton = document.getElementById("view-reels");
@@ -63,6 +80,10 @@ const nextReelButton = document.getElementById("next-reel");
 const postModal = document.getElementById("post-modal");
 const closeModalButton = document.getElementById("close-modal");
 const modalImage = document.getElementById("modal-image");
+const modalVideo = document.getElementById("modal-video");
+const modalPrevMedia = document.getElementById("modal-prev-media");
+const modalNextMedia = document.getElementById("modal-next-media");
+const modalMediaCount = document.getElementById("modal-media-count");
 const modalAvatar = document.getElementById("modal-avatar");
 const modalUser = document.getElementById("modal-user");
 const modalUserTrigger = document.getElementById("modal-user-trigger");
@@ -80,11 +101,13 @@ const applyCrop = document.getElementById("apply-crop");
 
 const avatarInput = document.getElementById("avatar");
 const postInput = document.getElementById("photo");
+const roleplayEngine = typeof RoleplayEngine === "function" ? new RoleplayEngine() : null;
 
 init();
 
-function init() {
-  hydrate();
+async function init() {
+  if (roleplayEngine) roleplayEngine.init();
+  await hydrate();
   ensureActiveAccount();
   searchInput.value = state.searchQuery;
   renderAll();
@@ -93,12 +116,16 @@ function init() {
   postForm.addEventListener("submit", handleCreatePost);
   commentForm.addEventListener("submit", handleAddComment);
   dmForm.addEventListener("submit", handleSendDm);
+  aiDmForm.addEventListener("submit", handleSendAiDm);
 
   avatarInput.addEventListener("change", () => startCrop("avatar"));
   postInput.addEventListener("change", handlePostFileChange);
 
   dmFrom.addEventListener("change", renderDmThread);
   dmTo.addEventListener("change", renderDmThread);
+  aiUser.addEventListener("change", renderAiThread);
+  aiAgent.addEventListener("change", renderAiThread);
+  dmMode.addEventListener("change", renderDmMode);
 
   searchInput.addEventListener("input", () => {
     state.searchQuery = searchInput.value.trim().toLowerCase();
@@ -110,8 +137,12 @@ function init() {
   clearButton.addEventListener("click", clearData);
 
   viewFeedButton.addEventListener("click", () => setViewMode("feed"));
+  viewPostButton.addEventListener("click", () => setViewMode("post"));
   viewExploreButton.addEventListener("click", () => setViewMode("explore"));
-  viewProfileButton.addEventListener("click", () => setViewMode("profile"));
+  viewProfileButton.addEventListener("click", () => {
+    state.profileViewingId = state.activeAccountId;
+    setViewMode("profile");
+  });
   viewReelsButton.addEventListener("click", () => setViewMode("reels"));
   viewDmButton.addEventListener("click", () => setViewMode("dm"));
 
@@ -123,9 +154,19 @@ function init() {
       event.preventDefault();
       nextReel();
     }
+    if (state.viewMode === "reels" && event.key === "ArrowLeft") {
+      event.preventDefault();
+      shiftReelMedia(-1);
+    }
+    if (state.viewMode === "reels" && event.key === "ArrowRight") {
+      event.preventDefault();
+      shiftReelMedia(1);
+    }
   });
 
   closeModalButton.addEventListener("click", closeModal);
+  modalPrevMedia.addEventListener("click", () => shiftPostMedia(-1));
+  modalNextMedia.addEventListener("click", () => shiftPostMedia(1));
   postModal.addEventListener("click", (event) => {
     if (event.target instanceof HTMLElement && event.target.tagName === "DIALOG") closeModal();
   });
@@ -164,27 +205,23 @@ function init() {
   applyCrop.addEventListener("click", applyCropResult);
 }
 
-function hydrate() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return;
+async function hydrate() {
+  const parsed = await readPersistedState();
+  if (!parsed) return;
 
-  try {
-    const parsed = JSON.parse(saved);
-    state.accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
-    state.posts = Array.isArray(parsed.posts) ? parsed.posts : [];
-    state.dms = Array.isArray(parsed.dms) ? parsed.dms : [];
-    state.follows = Array.isArray(parsed.follows) ? parsed.follows : [];
-    state.activeAccountId = parsed.activeAccountId || null;
-    state.viewMode = ["feed", "explore", "profile", "reels", "dm"].includes(parsed.viewMode) ? parsed.viewMode : "feed";
-    state.profileViewingId = parsed.profileViewingId || null;
-    state.searchQuery = typeof parsed.searchQuery === "string" ? parsed.searchQuery : "";
-  } catch {
-    localStorage.removeItem(STORAGE_KEY);
-  }
+  state.accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
+  state.posts = Array.isArray(parsed.posts) ? parsed.posts : [];
+  state.dms = Array.isArray(parsed.dms) ? parsed.dms : [];
+  state.follows = Array.isArray(parsed.follows) ? parsed.follows : [];
+  state.activeAccountId = parsed.activeAccountId || null;
+  state.viewMode = ["feed", "post", "explore", "profile", "reels", "dm"].includes(parsed.viewMode) ? parsed.viewMode : "feed";
+  state.profileViewingId = parsed.profileViewingId || null;
+  state.searchQuery = typeof parsed.searchQuery === "string" ? parsed.searchQuery : "";
+  state.agentMemory = parsed.agentMemory && typeof parsed.agentMemory === "object" ? parsed.agentMemory : {};
 }
 
 function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+  writePersistedState({
     accounts: state.accounts,
     posts: state.posts,
     dms: state.dms,
@@ -193,7 +230,11 @@ function persist() {
     viewMode: state.viewMode,
     profileViewingId: state.profileViewingId,
     searchQuery: state.searchQuery,
-  }));
+    agentMemory: state.agentMemory,
+  }).catch((error) => {
+    console.error("Unable to save app state", error);
+    alert("Unable to save app data on this device.");
+  });
 }
 
 function ensureActiveAccount() {
@@ -203,7 +244,10 @@ function ensureActiveAccount() {
 
 function setViewMode(mode) {
   state.viewMode = mode;
-  if (mode === "reels") state.currentReelIndex = 0;
+  if (mode === "reels") {
+    state.currentReelIndex = 0;
+    state.currentReelMediaIndex = 0;
+  }
   if (mode === "profile" && !state.profileViewingId) state.profileViewingId = state.activeAccountId;
   persist();
   renderAll();
@@ -221,12 +265,18 @@ async function handleCreateAccount(event) {
   event.preventDefault();
   const data = new FormData(accountForm);
   const username = String(data.get("username") || "").trim().toLowerCase();
+  const identity = String(data.get("identity") || "").trim();
+  const bio = String(data.get("bio") || "").trim();
+  const behavior = String(data.get("behavior") || "friendly").trim().toLowerCase();
   if (!username) return;
   if (state.accounts.some((item) => item.username === username)) return alert("That username already exists.");
 
   state.accounts.unshift({
     id: crypto.randomUUID(),
     username,
+    identity: identity || `${username} account`,
+    bio: bio || "",
+    behavior: behavior || "friendly",
     avatarDataUrl: cropState.target === "avatar" ? cropState.tempResult : null,
     createdAt: Date.now(),
   });
@@ -243,7 +293,7 @@ async function handleCreateAccount(event) {
 
 function setActiveAccount(accountId) {
   state.activeAccountId = accountId;
-  if (!state.profileViewingId) state.profileViewingId = accountId;
+  state.profileViewingId = accountId;
   persist();
   renderAll();
 }
@@ -255,14 +305,20 @@ async function handleCreatePost(event) {
   const data = new FormData(postForm);
   const caption = String(data.get("caption") || "").trim();
 
-  if (!cropState.tempResult || cropState.target !== "post") {
-    return alert("Choose an image and apply crop first.");
+  const mediaItems = cropState.tempPostMediaItems.length
+    ? cropState.tempPostMediaItems
+    : [{ type: cropState.tempMediaType || "image", dataUrl: cropState.tempResult }];
+
+  if (!mediaItems[0]?.dataUrl || cropState.target !== "post") {
+    return alert("Choose media first.");
   }
 
   state.posts.unshift({
     id: crypto.randomUUID(),
     accountId: state.activeAccountId,
-    imageDataUrl: cropState.tempResult,
+    imageDataUrl: mediaItems[0].dataUrl,
+    mediaType: mediaItems[0].type,
+    mediaItems,
     caption,
     comments: [],
     likes: [],
@@ -270,6 +326,8 @@ async function handleCreatePost(event) {
   });
 
   cropState.tempResult = null;
+  cropState.tempMediaType = "image";
+  cropState.tempPostMediaItems = [];
   postForm.reset();
   persist();
   renderAll();
@@ -306,13 +364,96 @@ function handleSendDm(event) {
   renderDmThread();
 }
 
+async function handleSendAiDm(event) {
+  event.preventDefault();
+  const fromId = aiUser.value;
+  const agentId = aiAgent.value;
+  const textInput = document.getElementById("ai-text");
+  const text = textInput.value.trim();
+  if (!fromId || !agentId || fromId === agentId || !text) return;
+
+  state.dms.push({ id: crypto.randomUUID(), fromId, toId: agentId, text, createdAt: Date.now(), mode: "agent-user" });
+
+  const agentAccount = state.accounts.find((account) => account.id === agentId);
+  const fromUser = state.accounts.find((account) => account.id === fromId);
+  let engineContext = { recent: [], summaries: [] };
+  let threadId = null;
+  if (roleplayEngine && agentAccount) {
+    await roleplayEngine.upsertCharacter(agentAccount);
+    const thread = await roleplayEngine.loadOrCreateThread(agentId, fromId);
+    threadId = thread?.id || null;
+    if (threadId) await roleplayEngine.addMessage(threadId, "user", text);
+    if (threadId) engineContext = await roleplayEngine.getContextForReply(threadId, 24);
+  }
+  if (text.toLowerCase().startsWith("/remember ")) {
+    const memoryText = text.slice(10).trim();
+    if (memoryText) {
+      LocalAgent.remember(state.agentMemory, fromId, agentId, memoryText);
+      state.dms.push({ id: crypto.randomUUID(), fromId: agentId, toId: fromId, text: `Noted. I'll remember: ${memoryText}`, createdAt: Date.now(), mode: "agent-bot" });
+      textInput.value = "";
+      persist();
+      renderAiThread();
+      return;
+    }
+  }
+  const history = state.dms.filter((dm) => (dm.fromId === fromId && dm.toId === agentId) || (dm.fromId === agentId && dm.toId === fromId)).slice(-20);
+  const response = LocalAgent.generateReply({
+    account: agentAccount || { id: agentId, username: "agent", identity: "", bio: "" },
+    fromUser: fromUser || { id: fromId, username: "user" },
+    input: text,
+    history,
+    engineContext,
+    memoryStore: state.agentMemory,
+  });
+  LocalAgent.remember(state.agentMemory, fromId, agentId, text, response);
+  if (threadId) {
+    await roleplayEngine.addMessage(threadId, "ai", response);
+    await roleplayEngine.maybeSummarize(threadId);
+  }
+  state.dms.push({ id: crypto.randomUUID(), fromId: agentId, toId: fromId, text: response, createdAt: Date.now(), mode: "agent-bot" });
+
+  textInput.value = "";
+  persist();
+  renderAiThread();
+}
+
 
 async function handlePostFileChange() {
-  const file = postInput.files?.[0];
-  if (!file) return;
-  if (!file.type.startsWith("image/")) {
-    alert("Please select an image file.");
+  const files = Array.from(postInput.files || []);
+  if (!files.length) return;
+
+  if (files.some((file) => !file.type.startsWith("image/") && file.type !== "video/mp4")) {
+    alert("Please select an image or MP4 video file.");
     postInput.value = "";
+    return;
+  }
+
+  if (files.length > 1) {
+    if (files.some((file) => !file.type.startsWith("image/"))) {
+      alert("Slideshows currently support images only.");
+      postInput.value = "";
+      return;
+    }
+    const mediaItems = await Promise.all(files.map(async (file) => ({
+      type: "image",
+      dataUrl: await normalizeImageFile(file, POST_SIZE, 0.9),
+    })));
+    cropState.target = "post";
+    cropState.tempPostMediaItems = mediaItems;
+    cropState.tempMediaType = "image";
+    cropState.tempResult = mediaItems[0]?.dataUrl || null;
+    alert(`Slideshow ready with ${mediaItems.length} images.`);
+    return;
+  }
+
+  const file = files[0];
+  cropState.tempPostMediaItems = [];
+
+  if (file.type === "video/mp4") {
+    cropState.target = "post";
+    cropState.tempMediaType = "video";
+    cropState.tempResult = await fileToDataUrl(file);
+    alert("MP4 video ready to post.");
     return;
   }
 
@@ -323,8 +464,9 @@ async function handlePostFileChange() {
   }
 
   cropState.target = "post";
-  cropState.tempResult = await fileToDataUrl(file);
-  alert("Post image kept uncropped.");
+  cropState.tempMediaType = "image";
+  cropState.tempResult = await normalizeImageFile(file, POST_SIZE, 0.9);
+  alert("Post image kept uncropped and optimized.");
 }
 
 function clearData() {
@@ -337,11 +479,74 @@ function clearData() {
   state.profileViewingId = null;
   state.viewMode = "feed";
   state.searchQuery = "";
+  state.agentMemory = {};
   state.currentReelIndex = 0;
+  state.currentReelMediaIndex = 0;
   state.selectedPostId = null;
-  localStorage.removeItem(STORAGE_KEY);
+  state.selectedPostMediaIndex = 0;
+  clearPersistedState().catch((error) => console.error("Unable to clear app data", error));
   renderAll();
   closeModal();
+}
+
+function openAppDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readPersistedState() {
+  const db = await openAppDb();
+  const dbResult = await new Promise((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readonly");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.get(DB_STATE_KEY);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+
+  if (dbResult) return dbResult;
+
+  const legacy = localStorage.getItem(STORAGE_KEY);
+  if (!legacy) return null;
+  try {
+    const parsed = JSON.parse(legacy);
+    await writePersistedState(parsed);
+    localStorage.removeItem(STORAGE_KEY);
+    return parsed;
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+    return null;
+  }
+}
+
+async function writePersistedState(data) {
+  const db = await openAppDb();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.put(data, DB_STATE_KEY);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function clearPersistedState() {
+  const db = await openAppDb();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.delete(DB_STATE_KEY);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+  localStorage.removeItem(STORAGE_KEY);
 }
 
 function renderAll() {
@@ -351,7 +556,9 @@ function renderAll() {
   renderAccounts();
   renderSearchResults();
   renderDmSelectors();
+  renderDmMode();
   renderDmThread();
+  renderAiThread();
   renderProfileHeader();
   renderFeed();
   renderReels();
@@ -360,13 +567,14 @@ function renderAll() {
 function renderModeSections() {
   const isDm = state.viewMode === "dm";
   dmPanel.classList.toggle("hidden", !isDm);
-  composeCard.classList.toggle("hidden", isDm);
+  composeCard.classList.toggle("hidden", state.viewMode !== "post");
   profileHeader.classList.toggle("hidden", isDm || state.viewMode !== "profile");
   feedEl.classList.toggle("hidden", isDm || state.viewMode === "reels");
 }
 
 function renderNav() {
   viewFeedButton.classList.toggle("active", state.viewMode === "feed");
+  viewPostButton.classList.toggle("active", state.viewMode === "post");
   viewExploreButton.classList.toggle("active", state.viewMode === "explore");
   viewProfileButton.classList.toggle("active", state.viewMode === "profile");
   viewReelsButton.classList.toggle("active", state.viewMode === "reels");
@@ -375,7 +583,8 @@ function renderNav() {
   if (state.viewMode === "profile") {
     const viewing = getViewingAccount();
     viewTitleEl.textContent = viewing ? `@${viewing.username}` : "Profile";
-  } else if (state.viewMode === "explore") viewTitleEl.textContent = "Explore";
+  } else if (state.viewMode === "post") viewTitleEl.textContent = "Create post";
+  else if (state.viewMode === "explore") viewTitleEl.textContent = "Explore";
   else if (state.viewMode === "reels") viewTitleEl.textContent = "Reels";
   else if (state.viewMode === "dm") viewTitleEl.textContent = "Messages";
   else viewTitleEl.textContent = "Home feed";
@@ -450,11 +659,17 @@ function renderDmSelectors() {
   const options = state.accounts.map((account) => `<option value="${account.id}">@${escapeHtml(account.username)}</option>`).join("");
   const fromCurrent = dmFrom.value;
   const toCurrent = dmTo.value;
+  const aiUserCurrent = aiUser.value;
+  const aiAgentCurrent = aiAgent.value;
   dmFrom.innerHTML = `<option value="">From</option>${options}`;
   dmTo.innerHTML = `<option value="">To</option>${options}`;
+  aiUser.innerHTML = `<option value="">You</option>${options}`;
+  aiAgent.innerHTML = `<option value="">AI agent</option>${options}`;
   if (state.accounts.length >= 2) {
     dmFrom.value = hasAccount(fromCurrent) ? fromCurrent : state.accounts[0].id;
     dmTo.value = hasAccount(toCurrent) ? toCurrent : state.accounts[1].id;
+    aiUser.value = hasAccount(aiUserCurrent) ? aiUserCurrent : state.accounts[0].id;
+    aiAgent.value = hasAccount(aiAgentCurrent) ? aiAgentCurrent : state.accounts[1].id;
   }
 }
 
@@ -481,6 +696,38 @@ function renderDmThread() {
   }
 }
 
+function renderDmMode() {
+  const mode = dmMode.value || "manual";
+  dmManualSection.classList.toggle("hidden", mode !== "manual");
+  dmAgentSection.classList.toggle("hidden", mode !== "agent");
+}
+
+function renderAiThread() {
+  aiThread.innerHTML = "";
+  const userId = aiUser.value;
+  const agentId = aiAgent.value;
+  if (!userId || !agentId || userId === agentId) {
+    aiThread.innerHTML = '<p class="muted small">Select a user and AI agent account.</p>';
+    return;
+  }
+
+  const messages = state.dms.filter((dm) => (dm.fromId === userId && dm.toId === agentId) || (dm.fromId === agentId && dm.toId === userId));
+  if (!messages.length) {
+    const agentAccount = state.accounts.find((acc) => acc.id === agentId);
+    aiThread.innerHTML = `<p class="muted small">${escapeHtml(LocalAgent.getOpener(agentAccount))}</p>`;
+    return;
+  }
+
+  for (const dm of messages) {
+    const sender = state.accounts.find((acc) => acc.id === dm.fromId);
+    const isAgent = dm.fromId === agentId;
+    const node = document.createElement("div");
+    node.className = `dm-msg ${isAgent ? "other" : "self"}`;
+    node.innerHTML = `<strong>${sender ? `@${escapeHtml(sender.username)}` : "@deleted"} ${isAgent ? "🤖" : ""}</strong><br>${escapeHtml(dm.text)}`;
+    aiThread.append(node);
+  }
+}
+
 function renderProfileHeader() {
   if (state.viewMode !== "profile") return;
   const account = getViewingAccount();
@@ -497,6 +744,7 @@ function renderProfileHeader() {
     <div class="profile-avatar-wrap"><img class="profile-avatar" src="${getAvatar(account)}" alt="avatar" /></div>
     <div>
       <h2>@${escapeHtml(account.username)}</h2>
+      ${account.bio ? `<p class="muted">${escapeHtml(account.bio)}</p>` : ""}
       <div class="profile-stats"><span><strong>${postsCount}</strong> posts</span><span><strong>${followers}</strong> followers</span><span><strong>${following}</strong> following</span></div>
       <button id="follow-btn" type="button">${isFollowingActive(account.id) ? "Following" : "Follow"}</button>
       <div class="follow-lists small"><div><strong>Followers:</strong> ${renderFollowNames(account.id, "followers") || '<span class="muted">none</span>'}</div><div><strong>Following:</strong> ${renderFollowNames(account.id, "following") || '<span class="muted">none</span>'}</div></div>
@@ -544,9 +792,13 @@ function renderFeed() {
 
   if (state.viewMode === "explore") {
     posts.forEach((post, index) => {
+      const firstMedia = getPostMediaItems(post)[0];
+      if (!firstMedia) return;
       const tile = document.createElement("article");
       tile.className = `explore-tile ${index % 7 === 2 ? "tall" : ""} ${index % 11 === 4 ? "wide" : ""}`;
-      tile.innerHTML = `<img src="${post.imageDataUrl}" alt="Explore post" />`;
+      tile.innerHTML = firstMedia.type === "video"
+        ? `<video src="${firstMedia.dataUrl}" muted playsinline preload="metadata"></video>`
+        : `<img src="${firstMedia.dataUrl}" alt="Explore post" />`;
       tile.addEventListener("click", () => openPost(post.id));
       feedEl.append(tile);
     });
@@ -555,6 +807,9 @@ function renderFeed() {
 
   for (const post of posts) {
     if (!Array.isArray(post.likes)) post.likes = [];
+    const mediaItems = getPostMediaItems(post);
+    const firstMedia = mediaItems[0];
+    if (!firstMedia) continue;
     const account = state.accounts.find((item) => item.id === post.accountId);
     const node = postTemplate.content.firstElementChild.cloneNode(true);
 
@@ -567,9 +822,26 @@ function renderFeed() {
     userButton.addEventListener("click", () => openProfile(account?.id));
 
     node.querySelector(".post-time").textContent = formatDate(post.createdAt);
-    const image = node.querySelector(".post-image");
-    image.src = post.imageDataUrl;
-    image.addEventListener("click", () => openPost(post.id));
+    const media = node.querySelector(".post-image");
+    if (firstMedia.type === "video") {
+      const video = document.createElement("video");
+      video.className = "post-image";
+      video.src = firstMedia.dataUrl;
+      video.controls = true;
+      video.playsInline = true;
+      video.preload = "metadata";
+      media.replaceWith(video);
+    } else {
+      media.src = firstMedia.dataUrl;
+      media.addEventListener("click", () => openPost(post.id));
+    }
+
+    if (mediaItems.length > 1) {
+      const count = document.createElement("p");
+      count.className = "muted small";
+      count.textContent = `${mediaItems.length} slides`;
+      node.querySelector(".post-footer").prepend(count);
+    }
 
     node.querySelector(".post-caption").textContent = post.caption;
     node.querySelector(".post-likes-count").textContent = `${post.likes.length} likes`;
@@ -598,16 +870,44 @@ function renderReels() {
 
   if (state.currentReelIndex >= state.posts.length) state.currentReelIndex = 0;
   const post = state.posts[state.currentReelIndex];
+  const mediaItems = getPostMediaItems(post);
+  if (!mediaItems.length) return;
+  if (state.currentReelMediaIndex >= mediaItems.length) state.currentReelMediaIndex = 0;
+  if (state.currentReelMediaIndex < 0) state.currentReelMediaIndex = mediaItems.length - 1;
+  const currentMedia = mediaItems[state.currentReelMediaIndex];
   const account = state.accounts.find((item) => item.id === post.accountId);
 
-  reelStage.innerHTML = `<img src="${post.imageDataUrl}" alt="Reel image" id="reel-image" /><div class="reel-meta"><div class="user-line"><img class="avatar" src="${getAvatar(account)}" alt="avatar" /><strong>@${escapeHtml(account?.username || "deleted")}</strong></div><p>${escapeHtml(post.caption || "")}</p></div>`;
-  const reelImage = document.getElementById("reel-image");
-  if (reelImage) reelImage.addEventListener("click", () => openPost(post.id));
+  const reelMedia = currentMedia.type === "video"
+    ? `<video src="${currentMedia.dataUrl}" id="reel-media" controls autoplay muted loop playsinline></video>`
+    : `<img src="${currentMedia.dataUrl}" alt="Reel image" id="reel-media" />`;
+  const slideControls = mediaItems.length > 1
+    ? `<button id="prev-reel-media" class="reel-slide-nav left" type="button" aria-label="Previous slide">‹</button>
+       <button id="next-reel-media" class="reel-slide-nav right" type="button" aria-label="Next slide">›</button>
+       <span class="reel-slide-count">${state.currentReelMediaIndex + 1}/${mediaItems.length}</span>`
+    : "";
+  reelStage.innerHTML = `${reelMedia}${slideControls}<div class="reel-meta"><div class="user-line"><img class="avatar" src="${getAvatar(account)}" alt="avatar" /><strong>@${escapeHtml(account?.username || "deleted")}</strong></div><p>${escapeHtml(post.caption || "")}</p></div>`;
+  const reelImage = document.getElementById("reel-media");
+  if (reelImage && currentMedia.type !== "video") reelImage.addEventListener("click", () => openPost(post.id));
+  const prevSlideButton = document.getElementById("prev-reel-media");
+  const nextSlideButton = document.getElementById("next-reel-media");
+  if (prevSlideButton) prevSlideButton.addEventListener("click", () => shiftReelMedia(-1));
+  if (nextSlideButton) nextSlideButton.addEventListener("click", () => shiftReelMedia(1));
 }
 
 function nextReel() {
   if (!state.posts.length) return;
   state.currentReelIndex = (state.currentReelIndex + 1) % state.posts.length;
+  state.currentReelMediaIndex = 0;
+  renderReels();
+}
+
+function shiftReelMedia(delta) {
+  if (!state.posts.length) return;
+  const post = state.posts[state.currentReelIndex];
+  if (!post) return;
+  const mediaItems = getPostMediaItems(post);
+  if (mediaItems.length < 2) return;
+  state.currentReelMediaIndex = (state.currentReelMediaIndex + delta + mediaItems.length) % mediaItems.length;
   renderReels();
 }
 
@@ -661,13 +961,36 @@ function openPost(postId) {
   const post = state.posts.find((item) => item.id === postId);
   if (!post) return;
   state.selectedPostId = post.id;
+  state.selectedPostMediaIndex = 0;
   renderPostModal(post);
   if (!postModal.open) postModal.showModal();
 }
 
 function renderPostModal(post) {
   const account = state.accounts.find((item) => item.id === post.accountId);
-  modalImage.src = post.imageDataUrl;
+  const mediaItems = getPostMediaItems(post);
+  if (!mediaItems.length) return;
+  if (state.selectedPostMediaIndex >= mediaItems.length) state.selectedPostMediaIndex = 0;
+  if (state.selectedPostMediaIndex < 0) state.selectedPostMediaIndex = mediaItems.length - 1;
+  const currentMedia = mediaItems[state.selectedPostMediaIndex];
+
+  if (currentMedia.type === "video") {
+    modalImage.classList.add("hidden");
+    modalVideo.classList.remove("hidden");
+    modalVideo.src = currentMedia.dataUrl;
+  } else {
+    modalVideo.classList.add("hidden");
+    modalVideo.pause();
+    modalVideo.src = "";
+    modalImage.classList.remove("hidden");
+    modalImage.src = currentMedia.dataUrl;
+  }
+  const hasMultipleMedia = mediaItems.length > 1;
+  modalPrevMedia.classList.toggle("hidden", !hasMultipleMedia);
+  modalNextMedia.classList.toggle("hidden", !hasMultipleMedia);
+  modalMediaCount.classList.toggle("hidden", !hasMultipleMedia);
+  modalMediaCount.textContent = hasMultipleMedia ? `${state.selectedPostMediaIndex + 1}/${mediaItems.length}` : "";
+
   modalAvatar.src = getAvatar(account);
   modalUser.textContent = account ? `@${account.username}` : "@deleted";
   modalCaption.textContent = post.caption;
@@ -705,7 +1028,26 @@ function renderPostModal(post) {
 
 function closeModal() {
   if (postModal.open) postModal.close();
+  modalVideo.pause();
+  modalVideo.src = "";
   state.selectedPostId = null;
+  state.selectedPostMediaIndex = 0;
+}
+
+function shiftPostMedia(delta) {
+  if (!state.selectedPostId) return;
+  const post = state.posts.find((item) => item.id === state.selectedPostId);
+  if (!post) return;
+  const mediaItems = getPostMediaItems(post);
+  if (mediaItems.length < 2) return;
+  state.selectedPostMediaIndex = (state.selectedPostMediaIndex + delta + mediaItems.length) % mediaItems.length;
+  renderPostModal(post);
+}
+
+function getPostMediaItems(post) {
+  if (Array.isArray(post.mediaItems) && post.mediaItems.length) return post.mediaItems;
+  if (post.imageDataUrl) return [{ type: post.mediaType || "image", dataUrl: post.imageDataUrl }];
+  return [];
 }
 
 function getVisiblePosts() {
@@ -771,7 +1113,9 @@ async function startCrop(target) {
 
   cropState.target = target;
   cropState.file = file;
-  cropState.image = await loadImage(await fileToDataUrl(file));
+  cropState.tempMediaType = "image";
+  cropState.tempPostMediaItems = [];
+  cropState.image = await loadImage(await normalizeImageFile(file, MAX_IMAGE_UPLOAD_DIMENSION, 0.92));
   cropState.outputSize = target === "avatar" ? AVATAR_SIZE : POST_SIZE;
   cropState.zoom = 1;
   cropState.x = 0;
@@ -836,9 +1180,27 @@ function applyCropResult() {
 
   context.drawImage(cropState.image, sourceX, sourceY, sourceSide, sourceSide, 0, 0, cropState.outputSize, cropState.outputSize);
   cropState.tempResult = canvas.toDataURL("image/jpeg", 0.92);
+  cropState.tempPostMediaItems = [{ type: "image", dataUrl: cropState.tempResult }];
 
   closeCropDialog();
   alert(`${cropState.target === "avatar" ? "Profile picture" : "Post image"} crop applied.`);
+}
+
+async function normalizeImageFile(file, maxDimension = POST_SIZE, quality = 0.92) {
+  const sourceImage = await loadImage(await fileToDataUrl(file));
+  const largestSide = Math.max(sourceImage.width, sourceImage.height);
+  if (largestSide <= maxDimension) return sourceImage.src;
+
+  const scale = maxDimension / largestSide;
+  const targetWidth = Math.max(1, Math.round(sourceImage.width * scale));
+  const targetHeight = Math.max(1, Math.round(sourceImage.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return sourceImage.src;
+  context.drawImage(sourceImage, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL("image/jpeg", quality);
 }
 
 function fileToDataUrl(file) {
