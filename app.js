@@ -101,10 +101,12 @@ const applyCrop = document.getElementById("apply-crop");
 
 const avatarInput = document.getElementById("avatar");
 const postInput = document.getElementById("photo");
+const roleplayEngine = typeof RoleplayEngine === "function" ? new RoleplayEngine() : null;
 
 init();
 
 async function init() {
+  if (roleplayEngine) roleplayEngine.init();
   await hydrate();
   ensureActiveAccount();
   searchInput.value = state.searchQuery;
@@ -374,6 +376,15 @@ async function handleSendAiDm(event) {
 
   const agentAccount = state.accounts.find((account) => account.id === agentId);
   const fromUser = state.accounts.find((account) => account.id === fromId);
+  let engineContext = { recent: [], summaries: [] };
+  let threadId = null;
+  if (roleplayEngine && agentAccount) {
+    await roleplayEngine.upsertCharacter(agentAccount);
+    const thread = await roleplayEngine.loadOrCreateThread(agentId, fromId);
+    threadId = thread?.id || null;
+    if (threadId) await roleplayEngine.addMessage(threadId, "user", text);
+    if (threadId) engineContext = await roleplayEngine.getContextForReply(threadId, 24);
+  }
   if (text.toLowerCase().startsWith("/remember ")) {
     const memoryText = text.slice(10).trim();
     if (memoryText) {
@@ -391,9 +402,14 @@ async function handleSendAiDm(event) {
     fromUser: fromUser || { id: fromId, username: "user" },
     input: text,
     history,
+    engineContext,
     memoryStore: state.agentMemory,
   });
   LocalAgent.remember(state.agentMemory, fromId, agentId, text, response);
+  if (threadId) {
+    await roleplayEngine.addMessage(threadId, "ai", response);
+    await roleplayEngine.maybeSummarize(threadId);
+  }
   state.dms.push({ id: crypto.randomUUID(), fromId: agentId, toId: fromId, text: response, createdAt: Date.now(), mode: "agent-bot" });
 
   textInput.value = "";

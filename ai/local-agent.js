@@ -135,21 +135,23 @@
     if (node.transcript.length % 12 === 0) refreshHierarchicalSummaries(node);
   }
 
-  function generateReply({ account, fromUser, input, history, memoryStore }) {
+  function generateReply({ account, fromUser, input, history, memoryStore, engineContext }) {
     const key = memoryKey(fromUser, account.id);
     const memory = ensureMemory(memoryStore, key);
     const lower = String(input || "").toLowerCase().trim();
     const seedWords = extractTopics(lower);
     const profileText = `${account.identity || ""} ${account.bio || ""}`;
     const historyText = (history || []).map((m) => m.text || "").join(". ");
+    const engineRecentText = (engineContext?.recent || []).map((m) => m.text || "").join(". ");
     const summaryText = [
       ...(memory.summaries?.[2] || []),
       ...(memory.summaries?.[1] || []),
+      ...((engineContext?.summaries || [])),
     ].join(" ");
     const corpora = []
       .concat(global.AI_CORPUS || [])
       .concat(memory.transcript || [])
-      .concat([profileText, historyText, summaryText, input]);
+      .concat([profileText, historyText, engineRecentText, summaryText, input]);
 
     if (/^(hey|hi|hello)\b/.test(lower)) {
       return `Hey ${fromUser.username}, what's up?`;
